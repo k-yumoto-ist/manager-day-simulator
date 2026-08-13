@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Bell, BellOff, BookOpen, CalendarDays, Check, ChevronRight, Clock3, Focus, Handshake, LogOut, MessageSquare, MoreHorizontal, Play, ShieldAlert, Sparkles, Target, Timer, Users } from 'lucide-react'
-import { actionConfig, delegates as delegateSeed, formatTime, initialTasks, meetings, scenarioEvents, senders } from './scenario'
+import { actionConfig, delegates as delegateSeed, formatTime, getModeData, modeSettings, senders, type GameModeId } from './scenario'
 import type { ActionId, ConversationMessage, DecisionLog, Delegate, Meeting, ScenarioEvent, Skill, WorkTask } from './types'
 
 type Metrics = { customer:number; team:number; business:number; energy:number; focus:number }
@@ -41,6 +41,7 @@ function Avatar({sender,size='normal'}:{sender:ScenarioEvent['sender'];size?:'no
 
 function App() {
   const [phase,setPhase] = useState<'intro'|'rules'|'play'|'result'>('intro')
+  const [selectedMode,setSelectedMode] = useState<GameModeId>('standard')
   const [time,setTime] = useState(0)
   const [selected,setSelected] = useState('release')
   const [conversationMessages,setConversationMessages] = useState<ConversationMessage[]>([])
@@ -52,7 +53,7 @@ function App() {
   const [snoozed,setSnoozed] = useState<Set<string>>(new Set())
   const [customEvents,setCustomEvents] = useState<ScenarioEvent[]>([])
   const [metrics,setMetrics] = useState<Metrics>({customer:78,team:76,business:64,energy:88,focus:82})
-  const [tasks,setTasks] = useState<WorkTask[]>(initialTasks)
+  const [tasks,setTasks] = useState<WorkTask[]>(()=>getModeData('standard').tasks)
   const [delegateList,setDelegateList] = useState<Delegate[]>(delegateSeed)
   const [delegateFor,setDelegateFor] = useState<ScenarioEvent|null>(null)
   const [meetingChoices,setMeetingChoices] = useState<Record<string,MeetingChoice>>({})
@@ -67,7 +68,9 @@ function App() {
   const [endConfirm,setEndConfirm] = useState(false)
   const previousVisible = useRef(0)
 
-  const allEvents = useMemo(() => [...scenarioEvents,...customEvents].sort((a,b)=>a.at-b.at),[customEvents])
+  const modeData = useMemo(()=>getModeData(selectedMode),[selectedMode])
+  const activeMeetings = modeData.meetings
+  const allEvents = useMemo(() => [...modeData.events,...customEvents].sort((a,b)=>a.at-b.at),[modeData.events,customEvents])
   const isSuppressed = (event:ScenarioEvent) => {
     const solved = resolvedAt[event.threadId]
     const firstAt = allEvents.find(e=>e.threadId===event.threadId)?.at ?? event.at
@@ -90,13 +93,13 @@ function App() {
   const pendingCount = threads.filter(t=>t.events.some(e=>e.importance>=4) && resolvedAt[t.id]===undefined).length
   const unfinishedTasks = tasks.filter(t=>t.progress<t.required).length
 
-  const activeMeeting = meetings.find(m => {
+  const activeMeeting = activeMeetings.find(m => {
     const choice=meetingChoices[m.id]
     const start=choice==='late'?m.start+10:m.start
     const end=choice==='leave'?m.start+Math.round((m.end-m.start)/2):(meetingEnds[m.id] ?? m.end)
     return (choice==='join'||choice==='late'||choice==='leave') && time>=start && time<end
   })
-  const meetingPrompt = meetings.find(m => !meetingChoices[m.id] && time >= m.start-10 && time <= m.start+12)
+  const meetingPrompt = activeMeetings.find(m => !meetingChoices[m.id] && time >= m.start-10 && time <= m.start+12)
   const totalTask = tasks.reduce((sum,t)=>sum+t.progress,0) / tasks.reduce((sum,t)=>sum+t.required,0) * 100
 
   const beep = () => {
@@ -111,9 +114,9 @@ function App() {
 
   useEffect(()=>{
     if(phase!=='play') return
-    const timer=window.setInterval(()=>setTime(t=>t+1),2000)
+    const timer=window.setInterval(()=>setTime(t=>t+1),modeData.config.tickMs)
     return ()=>window.clearInterval(timer)
-  },[phase])
+  },[phase,modeData.config.tickMs])
 
   useEffect(()=>{
     if(phase!=='play' || time<540) return
@@ -155,11 +158,11 @@ function App() {
 
   useEffect(()=>{
     if(phase!=='play') return
-    if(time>=118 && meetingChoices.m2==='join' && !meetingEnds.m2){
+    if(selectedMode!=='quick' && time>=118 && meetingChoices.m2==='join' && !meetingEnds.m2){
       setMeetingEnds(x=>({...x,m2:135})); setToast('「あと一点だけ…」顧客定例が15分延長しました')
       setLogs(l=>[...l,{at:118,title:'顧客定例',action:'会議延長',outcome:'次の予定と集中時間が15分圧迫された',severity:'warn'}])
     }
-  },[time,phase,meetingChoices.m2,meetingEnds.m2])
+  },[time,phase,meetingChoices.m2,meetingEnds.m2,selectedMode])
 
   const advance = (minutes:number) => setTime(t=>t+minutes)
   const adjust = (patch:Partial<Metrics>) => setMetrics(m=>({customer:clamp(m.customer+(patch.customer??0)),team:clamp(m.team+(patch.team??0)),business:clamp(m.business+(patch.business??0)),energy:clamp(m.energy+(patch.energy??0)),focus:clamp(m.focus+(patch.focus??0))}))
@@ -250,7 +253,7 @@ function App() {
   }
 
   const focusTask=(task:WorkTask,duration:number)=>{
-    const nextMeeting=meetings.find(m=>m.start>time && m.start<time+duration && meetingChoices[m.id]!=='skip'&&meetingChoices[m.id]!=='proxy')
+    const nextMeeting=activeMeetings.find(m=>m.start>time && m.start<time+duration && meetingChoices[m.id]!=='skip'&&meetingChoices[m.id]!=='proxy')
     const actual=nextMeeting?Math.max(5,nextMeeting.start-time):duration
     const factor=actual>=60?1.25:actual>=30?1.15:.82
     const cognitive=metrics.focus/100
@@ -277,14 +280,17 @@ function App() {
     setMissedMeeting(null)
   }
 
-  const startGame=()=>{setPhase('play');setTime(0);previousVisible.current=0}
+  const startGame=()=>{
+    const data=getModeData(selectedMode)
+    setPhase('play');setTime(0);previousVisible.current=0;setTasks(data.tasks);setCustomEvents([]);setConversationMessages([]);setReactions({});setRead(new Set());setResolvedAt({});setSnoozed(new Set());setMeetingChoices({});setMeetingAttention({});setMeetingEnds({});setProcessed(new Set());setLogs([]);setDelegateList(delegateSeed);setSelected('release');setInboxFilter('all');setReactionFor(null);setDelegateFor(null);setMissedMeeting(null);setEndConfirm(false);setStats({handled:0,reactions:0,delegated:0,responseMinutes:0,focusTotal:0,longestFocus:0,switches:0});setMetrics({customer:78,team:76,business:64,energy:88,focus:82})
+  }
   const endGame=()=> time>=540 ? setEndConfirm(true) : setPhase('result')
   const confirmEndGame=()=>{setEndConfirm(false);setPhase('result')}
   const restart=()=>window.location.reload()
 
-  if(phase==='intro') return <StartScreen onStart={startGame} onRules={()=>setPhase('rules')}/>
+  if(phase==='intro') return <StartScreen onStart={startGame} onRules={()=>setPhase('rules')} selectedMode={selectedMode} onSelectMode={setSelectedMode}/>
   if(phase==='rules') return <RulesScreen onBack={()=>setPhase('intro')} onStart={startGame}/>
-  if(phase==='result') return <ResultScreen time={time} metrics={metrics} tasks={tasks} stats={stats} unread={unreadCount} logs={logs} delegates={delegateList} onRestart={restart}/>
+  if(phase==='result') return <ResultScreen time={time} metrics={metrics} tasks={tasks} stats={stats} unread={unreadCount} logs={logs} delegates={delegateList} mode={modeData.config} onRestart={restart}/>
 
   return <div className="app-shell">
     <header className="topbar">
@@ -341,8 +347,8 @@ function App() {
 
       <aside className="right-rail">
         <section className="schedule-card panel">
-          <div className="panel-title"><div><CalendarDays size={17}/><strong>今日の予定</strong></div><span>{meetings.length}件</span></div>
-          <div className="schedule-list">{meetings.map(m=>{const choice=meetingChoices[m.id];const isNow=time>=m.start&&time<(meetingEnds[m.id]??m.end);return <div className={`meeting-row ${isNow?'now':''}`} key={m.id}>
+          <div className="panel-title"><div><CalendarDays size={17}/><strong>今日の予定</strong></div><span>{activeMeetings.length}件</span></div>
+          <div className="schedule-list">{activeMeetings.map(m=>{const choice=meetingChoices[m.id];const isNow=time>=m.start&&time<(meetingEnds[m.id]??m.end);return <div className={`meeting-row ${isNow?'now':''}`} key={m.id}>
             <span className="meeting-line" style={{background:m.color}}/><time>{formatTime(m.start)}<small>{formatTime(meetingEnds[m.id]??m.end)}</small></time><div><strong>{m.title}</strong><small>{m.owner} ・ 集中 {['','低','中','高'][m.focusNeed]}</small></div>{choice?<span className={`choice ${choice}`}>{({join:'参加',skip:'欠席',late:'途中',leave:'退出',proxy:'代理'} as const)[choice]}</span>:time<m.start&&m.start-time<=60?<button className="mini-plan" onClick={()=>decideMeeting(m,m.optional?'proxy':'join')}>{m.optional?'代理':'参加'}</button>:null}
           </div>})}</div>
         </section>
@@ -372,8 +378,12 @@ function MeetingPrompt({meeting,onChoose}:{meeting:Meeting;onChoose:(c:MeetingCh
   return <div className="meeting-prompt"><div><CalendarDays size={20}/><p><small>{formatTime(meeting.start)}から</small><strong>{meeting.title}</strong><span>集中必要度：{['','低','中','高'][meeting.focusNeed]}</span></p></div><div><button className="primary" onClick={()=>onChoose('join')}>参加</button><button onClick={()=>onChoose('late')}>途中参加</button><button onClick={()=>onChoose('leave')}>途中退出</button><button onClick={()=>onChoose('proxy')}>代理</button><button onClick={()=>onChoose('skip')}>欠席</button></div></div>
 }
 
-function StartScreen({onStart,onRules}:{onStart:()=>void;onRules:()=>void}){
-  return <div className="start-screen"><div className="start-window"><div className="start-visual"><div className="desk-clock"><Clock3/><strong>09:00</strong><span>THURSDAY</span></div><div className="visual-card vc1"><MessageSquare/><span><b>12</b> 未読メッセージ</span></div><div className="visual-card vc2"><CalendarDays/><span>会議 6件</span></div><div className="visual-card vc3"><Focus/><span>重要タスク 4件</span></div></div><div className="start-copy"><span className="eyebrow">MANAGER'S DAY</span><h1>あなたは今日から<br/>チームを率いる<br/><em>マネージャー</em>です。</h1><p>18:00までに重要な仕事を進めながら、<br/>チーム・顧客・事業を守ってください。</p><div className="start-rule"><Check/><span>すべての連絡に返信する必要はありません。</span></div><button onClick={onStart}><Play fill="currentColor"/>業務開始 <small>約15〜25分</small></button><button className="rules-link" onClick={onRules}><BookOpen/>ゲームルールを見る</button></div></div><p className="start-foot">1日の終わりに、あなたのマネジメントスタイルを振り返ります。</p></div>
+function StartScreen({onStart,onRules,selectedMode,onSelectMode}:{onStart:()=>void;onRules:()=>void;selectedMode:GameModeId;onSelectMode:(mode:GameModeId)=>void}){
+  return <div className="start-screen"><div className="start-window"><div className="start-visual"><div className="desk-clock"><Clock3/><strong>09:00</strong><span>THURSDAY</span></div><div className="visual-card vc1"><MessageSquare/><span><b>{modeSettings[selectedMode].eventIds.length}</b> チャット</span></div><div className="visual-card vc2"><CalendarDays/><span>会議 {modeSettings[selectedMode].meetingIds.length}件</span></div><div className="visual-card vc3"><Focus/><span>重要タスク {modeSettings[selectedMode].taskCount}件</span></div></div><div className="start-copy"><span className="eyebrow">MANAGER'S DAY</span><h1>あなたは今日から<br/>チームを率いる<br/><em>マネージャー</em>です。</h1><p>重要な仕事を進めながら、チーム・顧客・事業を守ってください。</p><div className="start-rule"><Check/><span>すべての連絡に返信する必要はありません。</span></div><ModePicker selectedMode={selectedMode} onSelect={onSelectMode}/><button onClick={onStart}><Play fill="currentColor"/>業務開始 <small>{modeSettings[selectedMode].estimatedPlayTime}</small></button><button className="rules-link" onClick={onRules}><BookOpen/>ゲームルールを見る</button></div></div><p className="start-foot">1日の終わりに、あなたのマネジメントスタイルを振り返ります。</p></div>
+}
+
+function ModePicker({selectedMode,onSelect}:{selectedMode:GameModeId;onSelect:(mode:GameModeId)=>void}){
+  return <div className="mode-picker" aria-label="プレイモードを選択">{(Object.values(modeSettings)).map(mode=><button key={mode.id} className={`mode-card ${selectedMode===mode.id?'selected':''}`} onClick={()=>onSelect(mode.id)}><span>{mode.id==='standard'&&<em>おすすめ</em>}{mode.estimatedPlayTime}</span><strong>{mode.label}</strong><small>{mode.description}</small></button>)}</div>
 }
 
 function RulesScreen({onBack,onStart}:{onBack:()=>void;onStart:()=>void}){
@@ -386,7 +396,7 @@ function RulesScreen({onBack,onStart}:{onBack:()=>void;onStart:()=>void}){
   return <div className="rules-screen"><header className="rules-header"><div className="brand"><span className="brand-mark">M</span><div><strong>Manager's Day</strong><small>ゲームルール</small></div></div><button onClick={onBack}><ArrowLeft/>トップへ戻る</button></header><main className="rules-main"><section className="rules-hero"><span className="eyebrow">HOW TO PLAY</span><h1>未読をゼロにするゲームではありません。</h1><p>限られた時間と注意力を、どこへ配分するか。重要な仕事を前に進めながら、チーム・顧客・事業を守り、できるだけ定時に退勤しましょう。</p><button onClick={onStart}><Play fill="currentColor"/>このまま業務開始</button></section><section className="rules-goal"><div><Target/><h2>勝ち筋</h2><p>重要な問題を見極め、自分のタスクも進め、健全な状態で1日を終えること。</p></div><div><Timer/><h2>時間</h2><p>1日は9:00〜18:00。行動や会議で時間が進み、18:00以降は残業です。</p></div><div><Handshake/><h2>マネジメント</h2><p>自分で抱え込まず、適性と負荷を見て人へ任せることも仕事です。</p></div></section><section className="rules-grid"><article><span className="rule-number">01</span><h2>チャットを読む</h2><p>顧客、メンバー、リーダー、営業、上司などから連絡が届きます。見た目の緊急さではなく、文章・相手・流れから重要度を判断してください。</p><p className="rule-note">FYI、感謝、CCだけの連絡は、反応しないことが最適な場合もあります。</p></article><article><span className="rule-number">02</span><h2>対応を選ぶ</h2><div className="action-rule-list">{actionRows.map(([name,time,description])=><div key={name}><strong>{name}</strong><span>{time}</span><p>{description}</p></div>)}</div></article><article><span className="rule-number">03</span><h2>会議を選ぶ</h2><p>会議開始前に参加・欠席・途中参加・途中退出・代理を選べます。会議中も通知は届きますが、内職をすると会議への集中度が下がります。</p><p className="rule-note">集中が必要な顧客定例や1on1では、聞き逃しが信頼低下や追加作業につながります。</p></article><article><span className="rule-number">04</span><h2>集中時間を守る</h2><p>重要タスクは右側のタスク欄から15・30・60分で進めます。最初の5分は準備に使われ、30分以上の連続作業にはボーナスがあります。</p><p className="rule-note">チャット、通話、会議などで中断すると集中状態は失われます。</p></article><article><span className="rule-number">05</span><h2>放置の代償を読む</h2><p>重要な連絡には見えない悪化タイマーがあります。技術懸念は障害へ、顧客問い合わせはクレームへ、相談は信頼低下や退職兆候へ進むことがあります。</p></article><article><span className="rule-number">06</span><h2>結果を振り返る</h2><p>退勤すると、5つの指標、集中時間、対応傾向、あなたのマネジメントタイプ、そして判断が生んだ分岐点を確認できます。</p></article></section><section className="rules-status"><div><h2>常に見る5つの指標</h2><p>一つだけを最大化しても、良い1日にはなりません。</p></div><div className="status-chips"><span>顧客信頼</span><span>チーム状態</span><span>事業成果</span><span>自分の余力</span><span>自分タスク進捗</span></div></section><section className="rules-cta"><div><span className="eyebrow">READY?</span><h2>今日は、何をあえて後回しにしますか？</h2></div><button onClick={onStart}><Play fill="currentColor"/>業務開始</button></section></main></div>
 }
 
-function ResultScreen({time,metrics,tasks,stats,unread,logs,delegates,onRestart}:{time:number;metrics:Metrics;tasks:WorkTask[];stats:{handled:number;reactions:number;delegated:number;responseMinutes:number;focusTotal:number;longestFocus:number;switches:number};unread:number;logs:DecisionLog[];delegates:Delegate[];onRestart:()=>void}){
+function ResultScreen({time,metrics,tasks,stats,unread,logs,delegates,mode,onRestart}:{time:number;metrics:Metrics;tasks:WorkTask[];stats:{handled:number;reactions:number;delegated:number;responseMinutes:number;focusTotal:number;longestFocus:number;switches:number};unread:number;logs:DecisionLog[];delegates:Delegate[];mode:typeof modeSettings[GameModeId];onRestart:()=>void}){
   const progress=tasks.reduce((s,t)=>s+t.progress,0)/tasks.reduce((s,t)=>s+t.required,0)*100
   const overtime=Math.max(0,time-540)
   let type='バランス型'
@@ -400,7 +410,7 @@ function ResultScreen({time,metrics,tasks,stats,unread,logs,delegates,onRestart}
   if(overtime>=180) type='長時間残業型'
   const scores={緊急対応:Math.round((metrics.customer+metrics.business)/20),顧客対応:Math.round(metrics.customer/10),育成:Math.round(metrics.team/10),委任:Math.min(10,3+stats.delegated),戦略思考:Math.round(progress/10),自己管理:Math.max(1,Math.round(metrics.energy/10)-Math.ceil(overtime/120))}
   const bestLogs=[...logs].sort((a,b)=>({bad:3,warn:2,good:1}[b.severity]-{bad:3,warn:2,good:1}[a.severity])).slice(0,5)
-  return <div className="result-screen"><header><div className="brand"><span className="brand-mark">M</span><strong>Manager's Day</strong></div><button onClick={onRestart}>もう一度プレイ</button></header><main><section className="result-hero"><span className="eyebrow">TODAY'S REVIEW</span><h1>今日も、おつかれさまでした。</h1><p>すべてを終えることより、何を選んだか。その積み重ねが今日の結果です。</p><div className="checkout"><div className={overtime>=180?'checkout-late':''}><small>最終退勤時刻</small><strong>{formatTime(time)}</strong><span>{overtime?`残業 ${formatDuration(overtime)}`:'定時内に退勤'}</span></div><div><small>重要タスク達成率</small><strong>{Math.round(progress)}<i>%</i></strong><span>{tasks.filter(t=>t.progress>=t.required).length} / 4 完了</span></div><div><small>未読チャット</small><strong>{unread}<i>件</i></strong><span>Inbox Zeroは目的ではありません</span></div></div>{overtime>=180&&<p className="night-shift-message">仕事は進みました。しかし、それを実現するために<strong>{formatDuration(overtime)}</strong>の残業をしています。</p>}</section>
+  return <div className="result-screen"><header><div className="brand"><span className="brand-mark">M</span><strong>Manager's Day</strong></div><button onClick={onRestart}>もう一度プレイ</button></header><main><section className="result-hero"><span className="eyebrow">TODAY'S REVIEW</span><h1>今日も、おつかれさまでした。</h1><p>すべてを終えることより、何を選んだか。その積み重ねが今日の結果です。</p><div className="mode-result"><span>プレイモード</span><strong>{mode.label}</strong><small>{mode.summary} {mode.evaluationTone}</small></div><div className="checkout"><div className={overtime>=180?'checkout-late':''}><small>最終退勤時刻</small><strong>{formatTime(time)}</strong><span>{overtime?`残業 ${formatDuration(overtime)}`:'定時内に退勤'}</span></div><div><small>重要タスク達成率</small><strong>{Math.round(progress)}<i>%</i></strong><span>{tasks.filter(t=>t.progress>=t.required).length} / {tasks.length} 完了</span></div><div><small>未読チャット</small><strong>{unread}<i>件</i></strong><span>Inbox Zeroは目的ではありません</span></div></div>{overtime>=180&&<p className="night-shift-message">仕事は進みました。しかし、それを実現するために<strong>{formatDuration(overtime)}</strong>の残業をしています。</p>}</section>
     <section className="result-grid"><div className="type-card"><span className="eyebrow">YOUR MANAGEMENT STYLE</span><h2>{type}<small>マネージャー</small></h2><p>{type==='長時間残業型'?`多くの課題を解決しましたが、最終退勤は${formatTime(time)}でした。成果を自分の時間で埋める傾向が強く、任せ方と時間設計には改善余地があります。`:type==='抱え込み型'?'目の前の問題を自分で解決する力は高い一方、抱え込みが重要タスクと余力を圧迫しました。適性を見て早めに任せると、チームの成長と自分の集中時間を両立できます。':type==='委任型'?'人に任せることで自分の時間を生み出しました。委任先の負荷を観察し、任せっぱなしにしない仕組みが次の一歩です。':type==='戦略型'?'通知に流されず、まとまった時間を重要タスクへ配分できました。必要な対話を取りこぼさないバランスも意識しましょう。':'チーム・顧客・自分の仕事のバランスを取りながら一日を運びました。小さな兆候を拾う精度をさらに磨けそうです。'}</p>{overtime>0&&<div className={`overtime-result ${overtime>=180?'late-night':''}`}><strong>最終退勤 {formatTime(time)}</strong><span>{formatDuration(overtime)}の残業。{overtime>=180?'仕事を終えても、時間設計は結果の一部です。':'残業が成果を補っていないか、振り返ってみましょう。'}</span></div>}<div className="score-bars">{Object.entries(scores).map(([k,v])=><div key={k}><span>{k}</span><div><i style={{width:`${v*10}%`}}/></div><b>{['E','D','D','C','C','B','B','A','A','S','S'][v]}</b></div>)}</div></div>
     <div className="metric-card"><h3>1日の指標</h3><Gauge label="顧客信頼" value={metrics.customer} color="#517263"/><Gauge label="チーム状態" value={metrics.team} color="#6b6482"/><Gauge label="事業成果" value={metrics.business} color="#7b6847"/><Gauge label="自分の余力" value={metrics.energy} color="#58707a"/><div className="stat-tiles"><div><strong>{stats.handled}</strong><span>対応件数</span></div><div><strong>{stats.reactions}</strong><span>リアクション</span></div><div><strong>{stats.delegated}</strong><span>委任</span></div><div><strong>{stats.handled?Math.round(stats.responseMinutes/stats.handled):0}<small>分</small></strong><span>平均返信</span></div><div><strong>{stats.focusTotal}<small>分</small></strong><span>集中合計</span></div><div><strong>{stats.longestFocus}<small>分</small></strong><span>最長集中</span></div></div><p className="load-note">委任先の最大負荷：{Math.max(...delegates.map(d=>d.load))}%</p></div></section>
     <section className="review-card"><div><span className="eyebrow">KEY MOMENTS</span><h2>今日の重要な分岐点</h2><p>あなたの判断が、後の出来事にどうつながったか。</p></div><div className="timeline">{bestLogs.length?bestLogs.map((l,i)=><div className={`timeline-item ${l.severity}`} key={i}><time>{formatTime(l.at)}</time><span className="timeline-dot"/><div><h3>{l.title}</h3><p><b>あなた：</b>{l.action}{l.message&&<><br/><span className="review-message">「{l.message}」</span></>}</p><p><b>その後：</b>{l.outcome}</p></div></div>):<p>まだ記録された分岐はありません。</p>}</div></section></main></div>
