@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BellOff, CalendarDays, Check, ChevronRight, Clock3, Focus, LogOut, MessageSquare, MoreHorizontal, Play, ShieldAlert, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, Bell, BellOff, BookOpen, CalendarDays, Check, ChevronRight, Clock3, Focus, Handshake, LogOut, MessageSquare, MoreHorizontal, Play, ShieldAlert, Sparkles, Target, Timer, Users } from 'lucide-react'
 import { actionConfig, delegates as delegateSeed, formatTime, initialTasks, meetings, scenarioEvents, senders } from './scenario'
 import type { ActionId, DecisionLog, Delegate, Meeting, ScenarioEvent, Skill, WorkTask } from './types'
 
@@ -24,7 +24,7 @@ function Avatar({sender,size='normal'}:{sender:ScenarioEvent['sender'];size?:'no
 }
 
 function App() {
-  const [phase,setPhase] = useState<'intro'|'play'|'result'>('intro')
+  const [phase,setPhase] = useState<'intro'|'rules'|'play'|'result'>('intro')
   const [time,setTime] = useState(0)
   const [selected,setSelected] = useState('release')
   const [read,setRead] = useState<Set<string>>(new Set())
@@ -211,7 +211,8 @@ function App() {
   const endGame=()=>setPhase('result')
   const restart=()=>window.location.reload()
 
-  if(phase==='intro') return <StartScreen onStart={startGame}/>
+  if(phase==='intro') return <StartScreen onStart={startGame} onRules={()=>setPhase('rules')}/>
+  if(phase==='rules') return <RulesScreen onBack={()=>setPhase('intro')} onStart={startGame}/>
   if(phase==='result') return <ResultScreen time={time} metrics={metrics} tasks={tasks} stats={stats} unread={unreadCount} logs={logs} delegates={delegateList} onRestart={restart}/>
 
   return <div className="app-shell">
@@ -284,8 +285,18 @@ function MeetingPrompt({meeting,onChoose}:{meeting:Meeting;onChoose:(c:MeetingCh
   return <div className="meeting-prompt"><div><CalendarDays size={20}/><p><small>{formatTime(meeting.start)}から</small><strong>{meeting.title}</strong><span>集中必要度：{['','低','中','高'][meeting.focusNeed]}</span></p></div><div><button className="primary" onClick={()=>onChoose('join')}>参加</button><button onClick={()=>onChoose('late')}>途中参加</button><button onClick={()=>onChoose('leave')}>途中退出</button><button onClick={()=>onChoose('proxy')}>代理</button><button onClick={()=>onChoose('skip')}>欠席</button></div></div>
 }
 
-function StartScreen({onStart}:{onStart:()=>void}){
-  return <div className="start-screen"><div className="start-window"><div className="start-visual"><div className="desk-clock"><Clock3/><strong>09:00</strong><span>THURSDAY</span></div><div className="visual-card vc1"><MessageSquare/><span><b>12</b> 未読メッセージ</span></div><div className="visual-card vc2"><CalendarDays/><span>会議 6件</span></div><div className="visual-card vc3"><Focus/><span>重要タスク 4件</span></div></div><div className="start-copy"><span className="eyebrow">MANAGER'S DAY</span><h1>あなたは今日から<br/>チームを率いる<br/><em>マネージャー</em>です。</h1><p>18:00までに重要な仕事を進めながら、<br/>チーム・顧客・事業を守ってください。</p><div className="start-rule"><Check/><span>すべての連絡に返信する必要はありません。</span></div><button onClick={onStart}><Play fill="currentColor"/>業務開始 <small>約15〜25分</small></button></div></div><p className="start-foot">1日の終わりに、あなたのマネジメントスタイルを振り返ります。</p></div>
+function StartScreen({onStart,onRules}:{onStart:()=>void;onRules:()=>void}){
+  return <div className="start-screen"><div className="start-window"><div className="start-visual"><div className="desk-clock"><Clock3/><strong>09:00</strong><span>THURSDAY</span></div><div className="visual-card vc1"><MessageSquare/><span><b>12</b> 未読メッセージ</span></div><div className="visual-card vc2"><CalendarDays/><span>会議 6件</span></div><div className="visual-card vc3"><Focus/><span>重要タスク 4件</span></div></div><div className="start-copy"><span className="eyebrow">MANAGER'S DAY</span><h1>あなたは今日から<br/>チームを率いる<br/><em>マネージャー</em>です。</h1><p>18:00までに重要な仕事を進めながら、<br/>チーム・顧客・事業を守ってください。</p><div className="start-rule"><Check/><span>すべての連絡に返信する必要はありません。</span></div><button onClick={onStart}><Play fill="currentColor"/>業務開始 <small>約15〜25分</small></button><button className="rules-link" onClick={onRules}><BookOpen/>ゲームルールを見る</button></div></div><p className="start-foot">1日の終わりに、あなたのマネジメントスタイルを振り返ります。</p></div>
+}
+
+function RulesScreen({onBack,onStart}:{onBack:()=>void;onStart:()=>void}){
+  const actionRows = [
+    ['リアクション','0〜1分','FYIや成果共有には有効。相談やリスクへの反応だけでは不十分です。'],
+    ['短く返信 / 質問','3〜4分','要点を返す、または判断に必要な情報を増やします。'],
+    ['丁寧に返信','9分','背景まで受け止める対応。顧客・メンバーの重要な懸念に有効です。'],
+    ['委任 / 通話','3分 / 20分','適任者に任せるか、会話で一気に解決します。委任先の負荷も見ましょう。'],
+  ]
+  return <div className="rules-screen"><header className="rules-header"><div className="brand"><span className="brand-mark">M</span><div><strong>Manager's Day</strong><small>ゲームルール</small></div></div><button onClick={onBack}><ArrowLeft/>トップへ戻る</button></header><main className="rules-main"><section className="rules-hero"><span className="eyebrow">HOW TO PLAY</span><h1>未読をゼロにするゲームではありません。</h1><p>限られた時間と注意力を、どこへ配分するか。重要な仕事を前に進めながら、チーム・顧客・事業を守り、できるだけ定時に退勤しましょう。</p><button onClick={onStart}><Play fill="currentColor"/>このまま業務開始</button></section><section className="rules-goal"><div><Target/><h2>勝ち筋</h2><p>重要な問題を見極め、自分のタスクも進め、健全な状態で1日を終えること。</p></div><div><Timer/><h2>時間</h2><p>1日は9:00〜18:00。行動や会議で時間が進み、18:00以降は残業です。</p></div><div><Handshake/><h2>マネジメント</h2><p>自分で抱え込まず、適性と負荷を見て人へ任せることも仕事です。</p></div></section><section className="rules-grid"><article><span className="rule-number">01</span><h2>チャットを読む</h2><p>顧客、メンバー、リーダー、営業、上司などから連絡が届きます。見た目の緊急さではなく、文章・相手・流れから重要度を判断してください。</p><p className="rule-note">FYI、感謝、CCだけの連絡は、反応しないことが最適な場合もあります。</p></article><article><span className="rule-number">02</span><h2>対応を選ぶ</h2><div className="action-rule-list">{actionRows.map(([name,time,description])=><div key={name}><strong>{name}</strong><span>{time}</span><p>{description}</p></div>)}</div></article><article><span className="rule-number">03</span><h2>会議を選ぶ</h2><p>会議開始前に参加・欠席・途中参加・途中退出・代理を選べます。会議中も通知は届きますが、内職をすると会議への集中度が下がります。</p><p className="rule-note">集中が必要な顧客定例や1on1では、聞き逃しが信頼低下や追加作業につながります。</p></article><article><span className="rule-number">04</span><h2>集中時間を守る</h2><p>重要タスクは右側のタスク欄から15・30・60分で進めます。最初の5分は準備に使われ、30分以上の連続作業にはボーナスがあります。</p><p className="rule-note">チャット、通話、会議などで中断すると集中状態は失われます。</p></article><article><span className="rule-number">05</span><h2>放置の代償を読む</h2><p>重要な連絡には見えない悪化タイマーがあります。技術懸念は障害へ、顧客問い合わせはクレームへ、相談は信頼低下や退職兆候へ進むことがあります。</p></article><article><span className="rule-number">06</span><h2>結果を振り返る</h2><p>退勤すると、5つの指標、集中時間、対応傾向、あなたのマネジメントタイプ、そして判断が生んだ分岐点を確認できます。</p></article></section><section className="rules-status"><div><h2>常に見る5つの指標</h2><p>一つだけを最大化しても、良い1日にはなりません。</p></div><div className="status-chips"><span>顧客信頼</span><span>チーム状態</span><span>事業成果</span><span>自分の余力</span><span>自分タスク進捗</span></div></section><section className="rules-cta"><div><span className="eyebrow">READY?</span><h2>今日は、何をあえて後回しにしますか？</h2></div><button onClick={onStart}><Play fill="currentColor"/>業務開始</button></section></main></div>
 }
 
 function ResultScreen({time,metrics,tasks,stats,unread,logs,delegates,onRestart}:{time:number;metrics:Metrics;tasks:WorkTask[];stats:{handled:number;reactions:number;delegated:number;responseMinutes:number;focusTotal:number;longestFocus:number;switches:number};unread:number;logs:DecisionLog[];delegates:Delegate[];onRestart:()=>void}){
