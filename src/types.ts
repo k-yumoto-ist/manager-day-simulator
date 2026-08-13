@@ -63,4 +63,16 @@ export interface DecisionLog {
   action: string
   outcome: string
   severity: 'good' | 'warn' | 'bad'
+  message?: string
+}
+
+export interface ConversationMessage {
+  id: string
+  threadId: string
+  senderId: 'player' | string
+  timestamp: number
+  text?: string
+  type: 'reply' | 'question' | 'delegation' | 'follow-up' | 'system'
+  relatedEventId: string
+  privateLabel?: string
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Bell, BellOff, BookOpen, CalendarDays, Check, ChevronRight, Clock3, Focus, Handshake, LogOut, MessageSquare, MoreHorizontal, Play, ShieldAlert, Sparkles, Target, Timer, Users } from 'lucide-react'
 import { actionConfig, delegates as delegateSeed, formatTime, initialTasks, meetings, scenarioEvents, senders } from './scenario'
-import type { ActionId, DecisionLog, Delegate, Meeting, ScenarioEvent, Skill, WorkTask } from './types'
+import type { ActionId, ConversationMessage, DecisionLog, Delegate, Meeting, ScenarioEvent, Skill, WorkTask } from './types'
 
 type Metrics = { customer:number; team:number; business:number; energy:number; focus:number }
 type MeetingChoice = 'join' | 'skip' | 'late' | 'leave' | 'proxy'
@@ -12,6 +12,20 @@ const formatDuration = (minutes:number) => minutes<60 ? `${minutes}分` : `${Mat
 const categorySkill: Record<ScenarioEvent['kind'], Skill> = {
   noise:'調整', simple:'調整', decision:'調整', sensitive:'育成', risk:'技術', sales:'顧客対応', admin:'調整'
 }
+
+const replyTemplates: Record<ScenarioEvent['kind'], Record<'short'|'careful'|'question'|'call'|'delegate', string[]>> = {
+  noise:{short:['共有ありがとうございます。確認しました。'],careful:['共有ありがとうございます。こちらでも確認しておきます。'],question:['念のため、対応が必要な点はありますか？'],call:['5分ほどお話しして確認させてください。'],delegate:['この件、担当メンバーにも確認をお願いします。']},
+  simple:{short:['確認します。少々お待ちください。'],careful:['ご連絡ありがとうございます。状況を確認のうえ、改めてご連絡します。'],question:['念のため、対象の状況をもう少し教えてください。'],call:['短時間で状況を確認したいので、お話しできますか？'],delegate:['この件、担当メンバーに確認をお願いします。']},
+  decision:{short:['承知しました。優先して確認します。'],careful:['承知しました。必要な論点を整理して、本日中に共有します。'],question:['期待するアウトプットと優先順位を確認させてください。'],call:['背景を揃えたいので、少しお時間いただけますか？'],delegate:['整理をリーダーにも手伝ってもらいます。']},
+  sensitive:{short:['連絡ありがとうございます。今日少し話しましょう。'],careful:['連絡ありがとうございます。気になっているので、今日きちんと時間を取って話しましょう。'],question:['どのあたりで困っていますか？もう少し状況を教えてください。'],call:['今、10分ほど話せますか？'],delegate:['この件はケアも必要なので、リーダーにも状況確認をお願いします。']},
+  risk:{short:['確認します。少々お待ちください。'],careful:['ご連絡ありがとうございます。影響範囲を確認し、対応方針をすぐ共有します。'],question:['再現条件と影響範囲をもう少し教えてください。'],call:['すぐ状況をそろえたいので、通話を設定します。'],delegate:['技術確認をリーダーにもお願いして、すぐ判断します。']},
+  sales:{short:['確認します。少し待ってください。'],careful:['承知しました。案件への影響を踏まえて、すぐに回答を整理します。'],question:['先方が特に気にしている点をもう少し教えてください。'],call:['提案前に5分だけ認識を合わせましょう。'],delegate:['顧客対応に強いリーダーにも確認をお願いします。']},
+  admin:{short:['確認しました。対応します。'],careful:['共有ありがとうございます。期限までに対応できるよう確認します。'],question:['対象と期限を念のため確認させてください。'],call:['手続きの確認を短時間でさせてください。'],delegate:['対応できるメンバーに確認を依頼します。']},
+}
+
+const reactionOptions = [
+  {emoji:'👍',label:'確認・了解'}, {emoji:'👀',label:'見ています'}, {emoji:'✅',label:'対応済み・OK'}, {emoji:'🙏',label:'ありがとう'}, {emoji:'🎉',label:'称賛・お祝い'},
+]
 
 function Gauge({label,value,color}:{label:string;value:number;color:string}) {
   return <div className="gauge">
@@ -29,6 +43,9 @@ function App() {
   const [phase,setPhase] = useState<'intro'|'rules'|'play'|'result'>('intro')
   const [time,setTime] = useState(0)
   const [selected,setSelected] = useState('release')
+  const [conversationMessages,setConversationMessages] = useState<ConversationMessage[]>([])
+  const [reactions,setReactions] = useState<Record<string,string[]>>({})
+  const [reactionFor,setReactionFor] = useState<ScenarioEvent|null>(null)
   const [inboxFilter,setInboxFilter] = useState<InboxFilter>('all')
   const [read,setRead] = useState<Set<string>>(new Set())
   const [resolvedAt,setResolvedAt] = useState<Record<string,number>>({})
@@ -68,6 +85,7 @@ function App() {
   const filteredThreads = inboxFilter==='mentions' ? mentionThreads : inboxFilter==='unread' ? unreadThreads : threads
   const selectedEvents = threads.find(t=>t.id===selected)?.events ?? []
   const selectedLast = selectedEvents[selectedEvents.length-1]
+  const selectedTimeline = [...selectedEvents.map(event=>({kind:'incoming' as const,event,timestamp:event.at})),...conversationMessages.filter(message=>message.threadId===selected).map(message=>({kind:'activity' as const,message,timestamp:message.timestamp}))].sort((a,b)=>a.timestamp-b.timestamp)
   const unreadCount = visible.filter(e=>!read.has(e.id)).length
   const pendingCount = threads.filter(t=>t.events.some(e=>e.importance>=4) && resolvedAt[t.id]===undefined).length
   const unfinishedTasks = tasks.filter(t=>t.progress<t.required).length
@@ -153,6 +171,13 @@ function App() {
     setSelected(id); setRead(r=>new Set([...r,...events.map(e=>e.id)]))
   }
 
+  const replyText = (event:ScenarioEvent, action:'short'|'careful'|'question'|'call'|'delegate') => {
+    const options = replyTemplates[event.kind][action]
+    return options[(event.id.length + time + action.length) % options.length]
+  }
+  const addConversationMessage=(message:ConversationMessage)=>setConversationMessages(items=>[...items,message])
+  const addFollowUp=(event:ScenarioEvent, at:number, text:string)=>setCustomEvents(items=>[...items,{...event,id:`follow-${event.id}-${at}`,at,message:text,mention:false}])
+
   const actionOutcome=(event:ScenarioEvent,action:ActionId)=>{
     if(action==='ignore') return event.kind==='noise'?'対応不要を見極め、時間を守った':'対応しなかったため、状況が続いている'
     if(action==='react') return event.kind==='noise'||event.kind==='simple'?'低コストで適切に意思表示した':'反応だけでは相手の懸念を受け止めきれなかった'
@@ -165,15 +190,26 @@ function App() {
 
   const performAction=(action:ActionId,event=selectedLast)=>{
     if(!event) return
+    if(action==='react'){setReactionFor(event);return}
     if(action==='delegate'){setDelegateFor(event);return}
     const cfg=actionConfig[action]
+    const sentAt=time+cfg.minutes
     advance(cfg.minutes)
     adjust({energy:-cfg.minutes*.09*overtimeEnergyRate,focus:-(action==='call'?5:1.3)*(time>=780?1.35:1)})
-    const weak = (event.kind==='sensitive'||event.kind==='risk') && (action==='react'||action==='short'||(time>=660&&action==='question'))
-    const solved = action==='careful'||action==='call'||(action==='short'&&!['sensitive','risk'].includes(event.kind))||(action==='react'&&event.kind==='noise')||(action==='ignore'&&event.kind==='noise')
+    const weak = (event.kind==='sensitive'||event.kind==='risk') && (action==='short'||(time>=660&&action==='question'))
+    const solved = action==='careful'||action==='call'||(action==='short'&&!['sensitive','risk'].includes(event.kind))||(action==='ignore'&&event.kind==='noise')
     if(solved) setResolvedAt(r=>({...r,[event.threadId]:time}))
-    if(action==='later') setSnoozed(s=>new Set(s).add(event.threadId))
-    if(action==='question') setCustomEvents(es=>[...es,{...event,id:`q-${event.id}-${time}`,at:time+18,message:'補足します。状況としては、先ほどお伝えした点に加えてもう一点確認いただきたいです。',mention:true}])
+    if(action==='later') {
+      setSnoozed(s=>new Set(s).add(event.threadId))
+      addConversationMessage({id:`later-${event.id}-${time}`,threadId:event.threadId,senderId:'player',timestamp:time,type:'system',relatedEventId:event.id,privateLabel:'🕒 あとで対応'})
+    }
+    if(['short','careful','question','call'].includes(action)) {
+      const replyAction = action as 'short'|'careful'|'question'|'call'
+      const text=replyText(event,replyAction)
+      addConversationMessage({id:`reply-${event.id}-${sentAt}-${action}`,threadId:event.threadId,senderId:'player',timestamp:sentAt,text,type:action==='question'?'question':'reply',relatedEventId:event.id})
+      if(action==='question') addFollowUp(event,sentAt+8,event.kind==='risk'?'決済部分のエラー処理です。テストが十分ではない気がしています。':'補足します。状況としては、先ほどお伝えした点に加えて確認いただきたいことがあります。')
+      if(action==='careful'&&event.kind==='sensitive') addFollowUp(event,sentAt+12,'ありがとうございます。少し安心しました。今日お話しできると助かります。')
+    }
     if(weak) adjust(event.kind==='sensitive'?{team:-5}:{customer:-4,business:-2})
     if(action==='careful'&&event.kind==='sensitive') adjust({team:5})
     if(action==='call') adjust(event.kind==='sensitive'?{team:8}:{customer:6})
@@ -183,18 +219,33 @@ function App() {
       setMeetingAttention(a=>({...a,[activeMeeting.id]:(a[activeMeeting.id]??100)-loss}))
       if((meetingAttention[activeMeeting.id]??100)-loss<62&&!missedMeeting) setMissedMeeting(activeMeeting)
     }
-    setStats(s=>({...s,handled:s.handled+1,reactions:s.reactions+(action==='react'?1:0),responseMinutes:s.responseMinutes+Math.max(0,time-event.at)}))
-    setLogs(l=>[...l,{at:time,title:event.branchLabel ?? `${senders[event.sender].name}の連絡`,action:cfg.label,outcome:actionOutcome(event,action),severity:weak?'bad':solved?'good':'warn'}])
+    setStats(s=>({...s,handled:s.handled+1,responseMinutes:s.responseMinutes+Math.max(0,time-event.at)}))
+    setLogs(l=>[...l,{at:sentAt,title:event.branchLabel ?? `${senders[event.sender].name}の連絡`,action:cfg.label,message:['short','careful','question','call'].includes(action)?replyText(event,action as 'short'|'careful'|'question'|'call'):action==='later'?'🕒 あとで対応':undefined,outcome:actionOutcome(event,action),severity:weak?'bad':solved?'good':'warn'}])
+  }
+
+  const applyReaction=(event:ScenarioEvent, emoji:string)=>{
+    const inappropriate=event.kind==='sensitive' && ['👍','👀','✅'].includes(emoji)
+    const celebratory=emoji==='🎉' && event.kind==='noise' && /助か|あり|公開|完了|受領/.test(event.message)
+    setReactions(current=>({...current,[event.id]:[...(current[event.id]??[]),emoji]}))
+    advance(1)
+    adjust(inappropriate?{team:-5,energy:-.1}:celebratory?{team:2,energy:-.1}:{energy:-.1})
+    setStats(s=>({...s,handled:s.handled+1,reactions:s.reactions+1,responseMinutes:s.responseMinutes+Math.max(0,time-event.at)}))
+    setLogs(l=>[...l,{at:time+1,title:event.branchLabel ?? `${senders[event.sender].name}の連絡`,action:`${emoji} リアクション`,message:emoji,outcome:inappropriate?'相談に対して反応だけでは不十分で、信頼が下がった':celebratory?'成果を低コストで称賛できた':'見たことを低コストで伝えた',severity:inappropriate?'bad':celebratory?'good':'warn'}])
+    setReactionFor(null)
   }
 
   const doDelegate=(person:Delegate)=>{
     if(!delegateFor)return
     const needed=categorySkill[delegateFor.kind]; const fit=person.skills[needed]; const overload=person.load>75
+    const sentAt=time+3
     advance(3); setDelegateList(d=>d.map(x=>x.id===person.id?{...x,load:Math.min(100,x.load+12)}:x))
+    const delegateText=`@${person.name.split(' ')[0]} この件、確認をお願いできますか？`
+    addConversationMessage({id:`delegate-${delegateFor.id}-${sentAt}`,threadId:delegateFor.threadId,senderId:'player',timestamp:sentAt,text:delegateText,type:'delegation',relatedEventId:delegateFor.id})
+    addConversationMessage({id:`delegate-system-${delegateFor.id}-${sentAt}`,threadId:delegateFor.threadId,senderId:person.id,timestamp:sentAt+1,type:'system',relatedEventId:delegateFor.id,privateLabel:`${person.name} をメンションしました`})
     setStats(s=>({...s,handled:s.handled+1,delegated:s.delegated+1,responseMinutes:s.responseMinutes+Math.max(0,time-delegateFor.at)}))
-    if(fit>=4&&!overload){setResolvedAt(r=>({...r,[delegateFor.threadId]:time}));adjust({team:2,business:delegateFor.kind==='sales'?4:1})}
-    else {adjust({team:-3});setCustomEvents(es=>[...es,{...delegateFor,id:`return-${delegateFor.id}-${time}`,at:time+35,message:`一度確認しましたが、判断が難しく戻します。進め方をご相談させてください。`,mention:true}])}
-    setLogs(l=>[...l,{at:time,title:delegateFor.branchLabel??'チャット対応',action:`${person.name}へ委任`,outcome:fit>=4&&!overload?'適性が合い、自律的に解決した':'適性または余力が合わず、差し戻しが発生',severity:fit>=4&&!overload?'good':'bad'}])
+    if(fit>=4&&!overload){setResolvedAt(r=>({...r,[delegateFor.threadId]:time}));adjust({team:2,business:delegateFor.kind==='sales'?4:1});addFollowUp(delegateFor,sentAt+10,'確認しました。こちらで対応を進めます。')}
+    else {adjust({team:-3});addFollowUp(delegateFor,sentAt+35,'一度確認しましたが、判断が難しく戻します。進め方をご相談させてください。')}
+    setLogs(l=>[...l,{at:sentAt,title:delegateFor.branchLabel??'チャット対応',action:`${person.name}へ委任`,message:delegateText,outcome:fit>=4&&!overload?'適性が合い、自律的に解決した':'適性または余力が合わず、差し戻しが発生',severity:fit>=4&&!overload?'good':'bad'}])
     setDelegateFor(null)
   }
 
@@ -271,11 +322,19 @@ function App() {
           {missedMeeting&&<div className="missed-card"><div><ShieldAlert size={20}/><strong>会議の内容を聞き逃しました</strong></div><p>「では先ほど話した対応について、来週までにお願いします。」何を指しているか分かりません。</p><div><button onClick={()=>resolveMissed('yes')}>承知しました</button><button onClick={()=>resolveMissed('repeat')}>もう一度説明してもらう</button><button onClick={()=>resolveMissed('member')}>後でメンバーに確認</button></div></div>}
           <div className="messages">
             <div className="day-divider"><span>今日</span></div>
-            {selectedEvents.map((e,i)=><div className="message" key={e.id}><Avatar sender={e.sender}/><div><div className="message-meta"><strong>{senders[e.sender].name}</strong><time>{formatTime(e.at)}</time>{e.mention&&<span className="mention">あなた宛</span>}</div><p>{e.message}</p>{i<selectedEvents.length-1&&<span className="thread-follow">スレッドが続いています</span>}</div></div>)}
+            {selectedTimeline.map((item,i)=>{
+              if(item.kind==='activity') {
+                const message=item.message
+                if(message.type==='system') return <div className="system-message" key={message.id}><span>{message.privateLabel}</span><time>{formatTime(message.timestamp)}</time></div>
+                return <div className="message message-self" key={message.id}><div><div className="message-meta"><strong>あなた</strong><time>{formatTime(message.timestamp)}</time><span className="sent-label">送信済み</span></div><p>{message.text}</p></div><span className="self-avatar">あ</span></div>
+              }
+              const e=item.event
+              return <div className="message" key={e.id}><Avatar sender={e.sender}/><div><div className="message-meta"><strong>{senders[e.sender].name}</strong><time>{formatTime(e.at)}</time>{e.mention&&<span className="mention">あなた宛</span>}</div><p>{e.message}</p>{reactions[e.id]?.length>0&&<div className="reaction-bar">{[...new Set(reactions[e.id])].map(emoji=><span key={emoji}>{emoji} {reactions[e.id].filter(value=>value===emoji).length}</span>)}</div>}{i<selectedTimeline.length-1&&<span className="thread-follow">スレッドが続いています</span>}</div></div>
+            })}
           </div>
           <div className="action-dock">
             <div className="dock-hint"><span>このメッセージにどう対応しますか？</span><small>緊急度は文面から判断してください</small></div>
-            <div className="action-grid">{(Object.entries(actionConfig) as [ActionId,typeof actionConfig[ActionId]][]).map(([id,c])=><button key={id} onClick={()=>performAction(id)} title={c.description}><span>{c.icon}</span><strong>{c.label}</strong><small>{c.minutes===0?'0分':`${c.minutes}分`}</small></button>)}</div>
+            <div className="action-grid">{(Object.entries(actionConfig) as [ActionId,typeof actionConfig[ActionId]][]).map(([id,c])=>{const preview=selectedLast&&['short','careful','question','call','delegate'].includes(id)?replyText(selectedLast,id as 'short'|'careful'|'question'|'call'|'delegate'):c.description;return <button key={id} onClick={()=>performAction(id)} title={preview}><span>{c.icon}</span><strong>{c.label}</strong><small>{c.minutes===0?'0分':`${c.minutes}分`}</small><em>{preview}</em></button>})}</div>
           </div>
         </>:<div className="chat-empty"><MessageSquare/><strong>会話を選択してください</strong></div>}
       </section>
@@ -302,6 +361,8 @@ function App() {
     </main>
 
     {endConfirm&&<div className="modal-backdrop"><div className="end-confirm-modal"><span className="eyebrow">END OF DAY</span><h2>本日の業務を終了しますか？</h2><p>未読を残して退勤することも、マネージャーとしての大切な判断です。</p><div className="end-summary"><div><strong>{unfinishedTasks}件</strong><span>未完了重要タスク</span></div><div><strong>{unreadCount}件</strong><span>未読チャット</span></div><div><strong>{pendingCount}件</strong><span>対応待ち</span></div></div><div className="confirm-actions"><button onClick={()=>setEndConfirm(false)}>キャンセル</button><button className="primary" onClick={confirmEndGame}>業務終了</button></div></div></div>}
+
+    {reactionFor&&<div className="modal-backdrop"><div className="reaction-modal"><div className="modal-head"><div><span className="eyebrow">REACTION</span><h2>リアクションを選ぶ</h2></div><button onClick={()=>setReactionFor(null)}>×</button></div><p>{reactionFor.message}</p><div className="reaction-options">{reactionOptions.map(option=><button key={option.emoji} onClick={()=>applyReaction(reactionFor,option.emoji)}><span>{option.emoji}</span><small>{option.label}</small></button>)}</div></div></div>}
 
     {delegateFor&&<div className="modal-backdrop"><div className="delegate-modal"><div className="modal-head"><div><span className="eyebrow">委任先を選ぶ</span><h2>誰に任せますか？</h2></div><button onClick={()=>setDelegateFor(null)}>×</button></div><div className="delegate-context"><strong>{senders[delegateFor.sender].name}</strong><p>{delegateFor.message}</p><span>求められる力：{categorySkill[delegateFor.kind]}</span></div><div className="delegate-options">{delegateList.map(d=><button key={d.id} onClick={()=>doDelegate(d)}><div><span className="avatar" style={{background:'#607067'}}>{d.name[0]}</span><p><strong>{d.name}</strong><small>{d.role}</small></p><ChevronRight/></div><div className="skill-row">{Object.entries(d.skills).map(([k,v])=><span key={k}>{k} <b>{'●'.repeat(Math.ceil(v/2))}</b></span>)}</div><div className="load-row"><span>現在の負荷</span><div><i style={{width:`${d.load}%`}}/></div><b>{d.load}%</b></div></button>)}</div></div></div>}
   </div>
@@ -342,7 +403,7 @@ function ResultScreen({time,metrics,tasks,stats,unread,logs,delegates,onRestart}
   return <div className="result-screen"><header><div className="brand"><span className="brand-mark">M</span><strong>Manager's Day</strong></div><button onClick={onRestart}>もう一度プレイ</button></header><main><section className="result-hero"><span className="eyebrow">TODAY'S REVIEW</span><h1>今日も、おつかれさまでした。</h1><p>すべてを終えることより、何を選んだか。その積み重ねが今日の結果です。</p><div className="checkout"><div className={overtime>=180?'checkout-late':''}><small>最終退勤時刻</small><strong>{formatTime(time)}</strong><span>{overtime?`残業 ${formatDuration(overtime)}`:'定時内に退勤'}</span></div><div><small>重要タスク達成率</small><strong>{Math.round(progress)}<i>%</i></strong><span>{tasks.filter(t=>t.progress>=t.required).length} / 4 完了</span></div><div><small>未読チャット</small><strong>{unread}<i>件</i></strong><span>Inbox Zeroは目的ではありません</span></div></div>{overtime>=180&&<p className="night-shift-message">仕事は進みました。しかし、それを実現するために<strong>{formatDuration(overtime)}</strong>の残業をしています。</p>}</section>
     <section className="result-grid"><div className="type-card"><span className="eyebrow">YOUR MANAGEMENT STYLE</span><h2>{type}<small>マネージャー</small></h2><p>{type==='長時間残業型'?`多くの課題を解決しましたが、最終退勤は${formatTime(time)}でした。成果を自分の時間で埋める傾向が強く、任せ方と時間設計には改善余地があります。`:type==='抱え込み型'?'目の前の問題を自分で解決する力は高い一方、抱え込みが重要タスクと余力を圧迫しました。適性を見て早めに任せると、チームの成長と自分の集中時間を両立できます。':type==='委任型'?'人に任せることで自分の時間を生み出しました。委任先の負荷を観察し、任せっぱなしにしない仕組みが次の一歩です。':type==='戦略型'?'通知に流されず、まとまった時間を重要タスクへ配分できました。必要な対話を取りこぼさないバランスも意識しましょう。':'チーム・顧客・自分の仕事のバランスを取りながら一日を運びました。小さな兆候を拾う精度をさらに磨けそうです。'}</p>{overtime>0&&<div className={`overtime-result ${overtime>=180?'late-night':''}`}><strong>最終退勤 {formatTime(time)}</strong><span>{formatDuration(overtime)}の残業。{overtime>=180?'仕事を終えても、時間設計は結果の一部です。':'残業が成果を補っていないか、振り返ってみましょう。'}</span></div>}<div className="score-bars">{Object.entries(scores).map(([k,v])=><div key={k}><span>{k}</span><div><i style={{width:`${v*10}%`}}/></div><b>{['E','D','D','C','C','B','B','A','A','S','S'][v]}</b></div>)}</div></div>
     <div className="metric-card"><h3>1日の指標</h3><Gauge label="顧客信頼" value={metrics.customer} color="#517263"/><Gauge label="チーム状態" value={metrics.team} color="#6b6482"/><Gauge label="事業成果" value={metrics.business} color="#7b6847"/><Gauge label="自分の余力" value={metrics.energy} color="#58707a"/><div className="stat-tiles"><div><strong>{stats.handled}</strong><span>対応件数</span></div><div><strong>{stats.reactions}</strong><span>リアクション</span></div><div><strong>{stats.delegated}</strong><span>委任</span></div><div><strong>{stats.handled?Math.round(stats.responseMinutes/stats.handled):0}<small>分</small></strong><span>平均返信</span></div><div><strong>{stats.focusTotal}<small>分</small></strong><span>集中合計</span></div><div><strong>{stats.longestFocus}<small>分</small></strong><span>最長集中</span></div></div><p className="load-note">委任先の最大負荷：{Math.max(...delegates.map(d=>d.load))}%</p></div></section>
-    <section className="review-card"><div><span className="eyebrow">KEY MOMENTS</span><h2>今日の重要な分岐点</h2><p>あなたの判断が、後の出来事にどうつながったか。</p></div><div className="timeline">{bestLogs.length?bestLogs.map((l,i)=><div className={`timeline-item ${l.severity}`} key={i}><time>{formatTime(l.at)}</time><span className="timeline-dot"/><div><h3>{l.title}</h3><p><b>あなた：</b>{l.action}</p><p><b>その後：</b>{l.outcome}</p></div></div>):<p>まだ記録された分岐はありません。</p>}</div></section></main></div>
+    <section className="review-card"><div><span className="eyebrow">KEY MOMENTS</span><h2>今日の重要な分岐点</h2><p>あなたの判断が、後の出来事にどうつながったか。</p></div><div className="timeline">{bestLogs.length?bestLogs.map((l,i)=><div className={`timeline-item ${l.severity}`} key={i}><time>{formatTime(l.at)}</time><span className="timeline-dot"/><div><h3>{l.title}</h3><p><b>あなた：</b>{l.action}{l.message&&<><br/><span className="review-message">「{l.message}」</span></>}</p><p><b>その後：</b>{l.outcome}</p></div></div>):<p>まだ記録された分岐はありません。</p>}</div></section></main></div>
 }
 
 export default App
