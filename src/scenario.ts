@@ -61,6 +61,11 @@ export const scenarioEvents: ScenarioEvent[] = [
   {id:'e43',threadId:'client-report',at:481,sender:'client2',message:'月次レポート受領しました。ありがとうございました。',importance:1,urgency:1,kind:'noise'},
   {id:'e44',threadId:'sales-deal',at:497,sender:'sales',message:'案件の件、先方から前向きな返事が来ました。サポートありがとうございました！',importance:2,urgency:1,kind:'noise'},
   {id:'e45',threadId:'last-admin',at:515,sender:'hr',message:'勤怠承認が残り1件です。本日中にお願いします。',importance:2,urgency:4,kind:'admin',mention:true},
+  {id:'e46',threadId:'release-night',at:565,sender:'sato',message:'日中の認証障害の恒久対応案をまとめました。明朝の判断で問題ありませんが、念のため共有です。',importance:3,urgency:1,kind:'simple'},
+  {id:'e47',threadId:'client-call',at:618,sender:'client',message:'夜分に失礼します。今日の障害について、明日の業務開始前に説明の場をお願いできますか。',importance:5,urgency:4,kind:'risk',mention:true,branchLabel:'夜間の顧客フォロー'},
+  {id:'e48',threadId:'general-night',at:688,sender:'general',message:'明日の朝会資料、更新済みです。確認は明日で大丈夫です。',importance:1,urgency:1,kind:'noise'},
+  {id:'e49',threadId:'release-night',at:793,sender:'qa',message:'夜間監視は安定しています。恒久対応のレビューだけ、明朝お願いできますか。',importance:3,urgency:1,kind:'simple'},
+  {id:'e50',threadId:'client-call',at:842,sender:'client',message:'@manager 本日のご対応ありがとうございました。明朝の説明について、よろしくお願いします。',importance:2,urgency:1,kind:'simple',mention:true},
 ]
 
 export const meetings: Meeting[] = [
