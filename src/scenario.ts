@@ -104,12 +104,12 @@ export interface GameModeConfig {
 
 export const modeSettings: Record<GameModeId, GameModeConfig> = {
   quick: {
-    id:'quick', label:'クイック', shortLabel:'QUICK', estimatedPlayTime:'約5分', description:'短時間で忙しさを体験', summary:'短時間で判断の難しさを体験しました。', tickMs:850,
-    eventIds:['e01','e03','e04','e05','e07','e09','e10','e12','e13','e16','e18','e19','e21','e24','e29','e32'], meetingIds:['m1','m2'], taskCount:2, taskEffort:.52, escalationTempo:'fast', evaluationTone:'短時間でも、すべてを救えない優先順位の難しさが残るモードです。',
+    id:'quick', label:'クイック', shortLabel:'QUICK', estimatedPlayTime:'約5分', description:'同じ1日を短時間で体験', summary:'フルデイと同じ密度を、短いリアル時間で体験しました。', tickMs:620,
+    eventIds:scenarioEvents.map(event=>event.id), meetingIds:meetings.map(meeting=>meeting.id), taskCount:4, taskEffort:1, escalationTempo:'fast', evaluationTone:'会議・タスク・イベント連鎖はフルデイと同じです。リアル時間だけを短くしています。',
   },
   standard: {
-    id:'standard', label:'スタンダード', shortLabel:'STANDARD', estimatedPlayTime:'約10〜15分', description:'おすすめの基本モード', summary:'1日の優先順位管理をバランスよく体験しました。', tickMs:1150,
-    eventIds:['e01','e02','e03','e04','e05','e06','e07','e08','e09','e10','e12','e13','e14','e16','e18','e19','e21','e23','e24','e25','e27','e29','e31','e32','e34','e35','e37','e38','e40','e41','e44','e45'], meetingIds:['m1','m2','m4','m5'], taskCount:3, taskEffort:.78, escalationTempo:'standard', evaluationTone:'判断とその後の影響を、最もバランスよく味わえる基本モードです。',
+    id:'standard', label:'スタンダード', shortLabel:'STANDARD', estimatedPlayTime:'約10〜15分', description:'おすすめの基本モード', summary:'同じ1日の優先順位管理を、標準のテンポで体験しました。', tickMs:1100,
+    eventIds:scenarioEvents.map(event=>event.id), meetingIds:meetings.map(meeting=>meeting.id), taskCount:4, taskEffort:1, escalationTempo:'standard', evaluationTone:'会議・タスク・イベント連鎖はフルデイと同じです。判断に使えるリアル時間を標準にしています。',
   },
   fullday: {
     id:'fullday', label:'フルデイ', shortLabel:'FULL DAY', estimatedPlayTime:'約20〜25分', description:'じっくり1日を体験', summary:'複雑な割り込みと残業判断まで含めて体験しました。', tickMs:1800,
@@ -117,16 +117,14 @@ export const modeSettings: Record<GameModeId, GameModeConfig> = {
   },
 }
 
-const quickTimeline = [5,12,18,24,32,42,50,61,72,86,98,110,125,140,158,176]
-
 export const getModeData = (mode:GameModeId) => {
   const config=modeSettings[mode]
   const byId=new Map(scenarioEvents.map(event=>[event.id,event]))
-  const events=config.eventIds.map((id,index)=>{
+  const events=config.eventIds.map(id=>{
     const event=byId.get(id)!
-    return mode==='quick' ? {...event,at:quickTimeline[index] ?? event.at} : {...event}
+    return {...event}
   })
-  const selectedMeetings=meetings.filter(meeting=>config.meetingIds.includes(meeting.id)).map((meeting,index)=> mode==='quick' ? {...meeting,start:[28,70][index] ?? meeting.start,end:[55,125][index] ?? meeting.end} : {...meeting})
+  const selectedMeetings=meetings.filter(meeting=>config.meetingIds.includes(meeting.id)).map(meeting=>({...meeting}))
   const tasks=initialTasks.slice(0,config.taskCount).map(task=>({...task,required:Math.round(task.required*config.taskEffort),progress:0}))
   return {config,events,meetings:selectedMeetings,tasks}
 }

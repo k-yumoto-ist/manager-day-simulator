@@ -158,7 +158,7 @@ function App() {
 
   useEffect(()=>{
     if(phase!=='play') return
-    if(selectedMode!=='quick' && time>=118 && meetingChoices.m2==='join' && !meetingEnds.m2){
+    if(time>=118 && meetingChoices.m2==='join' && !meetingEnds.m2){
       setMeetingEnds(x=>({...x,m2:135})); setToast('「あと一点だけ…」顧客定例が15分延長しました')
       setLogs(l=>[...l,{at:118,title:'顧客定例',action:'会議延長',outcome:'次の予定と集中時間が15分圧迫された',severity:'warn'}])
     }
