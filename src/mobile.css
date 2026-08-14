@@ -25,14 +25,22 @@
   .mobile-filter-row button.active { background: #e3eee7; color: #315b49; border-color: #95b5a3; font-weight: 700; }
   .mobile-filter-row b { margin-left: 4px; font-size: 9px; }
   .mobile-thread-list { background: #fff; }
-  .mobile-thread { width: 100%; min-height: 74px; display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; background: #fff; border: 0; border-bottom: 1px solid #edf0ee; text-align: left; }
-  .mobile-thread.selected { background: #edf3ef; }
-  .mobile-thread > span { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
-  .mobile-thread strong { font-size: 12px; }
-  .mobile-thread small { font-size: 9px; color: #849089; }
-  .mobile-thread em { font-size: 11px; line-height: 1.35; font-style: normal; color: #64716b; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .mobile-thread > i { font-style: normal; font-size: 11px; color: #416957; background: #e3eee7; border-radius: 5px; padding: 2px 4px; }
-  .mobile-thread > svg { color: #9b7a40; margin-top: 4px; }
+  .mobile-thread { width: 100%; min-height: 76px; display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: #fff; border: 0; border-bottom: 1px solid #edf0ee; text-align: left; }
+  .mobile-thread > .avatar { width: 42px; height: 42px; flex: 0 0 42px; border-radius: 12px; font-size: 13px; box-shadow: none; }
+  .mobile-thread.selected { background: #f3f7f4; }
+  .mobile-thread.unread { background: #fcfefd; }
+  .mobile-thread-content { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .mobile-thread-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .mobile-thread strong { min-width: 0; font-size: 12px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mobile-thread.unread strong { font-weight: 750; color: #263c31; }
+  .mobile-thread time { flex: 0 0 auto; font-size: 9px; color: #89938e; }
+  .mobile-thread small { font-size: 9px; color: #8a948f; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mobile-thread em { font-size: 11px; line-height: 1.3; font-style: normal; color: #69766f; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .mobile-thread.unread em { color: #415047; font-weight: 600; }
+  .mobile-thread-signals { width: 22px; flex: 0 0 22px; min-height: 42px; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 4px; }
+  .mobile-thread-signals i { display: grid; place-items: center; width: 19px; height: 19px; font-style: normal; font-size: 10px; font-weight: 700; color: #416957; background: #e3eee7; border-radius: 6px; }
+  .mobile-thread-signals b { width: 7px; height: 7px; border-radius: 50%; background: #3e745d; }
+  .mobile-thread-signals svg { color: #9b7a40; }
   .mobile-empty { padding: 52px 20px; text-align: center; font-size: 12px; color: #77847d; }
   .mobile-chat-detail { min-height: calc(100dvh - 134px); display: flex; flex-direction: column; background: #fff; }
   .mobile-detail-head { min-height: 62px; display: flex; align-items: center; gap: 9px; padding: 0 12px; border-bottom: 1px solid #e1e6e3; }
