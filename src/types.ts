@@ -76,3 +76,47 @@ export interface ConversationMessage {
   relatedEventId: string
   privateLabel?: string
 }
+
+export type CharacterInteractionAction = ActionId | 'meeting' | 'meeting-recovery'
+
+export interface CharacterInteraction {
+  id: string
+  characterId: string
+  at: number
+  action: CharacterInteractionAction
+  eventId?: string
+  threadId?: string
+  eventAt?: number
+  eventMessage?: string
+  responseDelay?: number
+  message?: string
+  reaction?: string
+  consequence?: string
+  effective?: boolean
+  delegateCharacterId?: string
+  delegateName?: string
+  meetingId?: string
+  meetingTitle?: string
+  meetingChoice?: string
+  duringMeetingId?: string
+}
+
+export type PerspectiveTone = 'positive' | 'neutral' | 'negative' | 'mixed'
+
+export interface PerspectiveMoment {
+  id: string
+  at: number
+  eventMessage?: string
+  playerAction: string
+  interpretation: string
+  tone: PerspectiveTone
+}
+
+export interface StakeholderPerspective {
+  characterId: string
+  tone: PerspectiveTone
+  quote: string
+  impression: string
+  relationship: string
+  moments: PerspectiveMoment[]
+}

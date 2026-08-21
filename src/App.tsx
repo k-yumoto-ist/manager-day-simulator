@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Bell, BellOff, BookOpen, CalendarDays, Check, ChevronRight, Clock3, Focus, Handshake, LogOut, MessageSquare, MoreHorizontal, Play, ShieldAlert, Sparkles, Target, Timer, Users } from 'lucide-react'
 import { actionConfig, delegates as delegateSeed, formatTime, getModeData, modeSettings, senders, type GameModeId } from './scenario'
-import type { ActionId, ConversationMessage, DecisionLog, Delegate, Meeting, ScenarioEvent, Skill, WorkTask } from './types'
+import { generateStakeholderPerspectives } from './perspectives'
+import type { ActionId, CharacterInteraction, ConversationMessage, DecisionLog, Delegate, Meeting, ScenarioEvent, Skill, WorkTask } from './types'
 
 type Metrics = { customer:number; team:number; business:number; energy:number; focus:number }
 type MeetingChoice = 'join' | 'skip' | 'late' | 'leave' | 'proxy'
@@ -12,6 +13,8 @@ const formatDuration = (minutes:number) => minutes<60 ? `${minutes}分` : `${Mat
 const categorySkill: Record<ScenarioEvent['kind'], Skill> = {
   noise:'調整', simple:'調整', decision:'調整', sensitive:'育成', risk:'技術', sales:'顧客対応', admin:'調整'
 }
+const delegateCharacterIds:Record<string,string>={d1:'sato',d2:'ito',d3:'tanaka'}
+const meetingCharacterIds:Record<string,string>={m1:'sato',m2:'client',m4:'suzuki',m5:'sales',m6:'boss'}
 
 const replyTemplates: Record<ScenarioEvent['kind'], Record<'short'|'careful'|'question'|'call'|'delegate', string[]>> = {
   noise:{short:['共有ありがとうございます。確認しました。'],careful:['共有ありがとうございます。こちらでも確認しておきます。'],question:['念のため、対応が必要な点はありますか？'],call:['5分ほどお話しして確認させてください。'],delegate:['この件、担当メンバーにも確認をお願いします。']},
@@ -68,6 +71,7 @@ function App() {
   const [missedMeeting,setMissedMeeting] = useState<Meeting|null>(null)
   const [processed,setProcessed] = useState<Set<string>>(new Set())
   const [logs,setLogs] = useState<DecisionLog[]>([])
+  const [interactions,setInteractions] = useState<CharacterInteraction[]>([])
   const [stats,setStats] = useState({handled:0,reactions:0,delegated:0,responseMinutes:0,focusTotal:0,longestFocus:0,switches:0})
   const [muted,setMuted] = useState(false)
   const [toast,setToast] = useState<string|null>(null)
@@ -189,6 +193,7 @@ function App() {
     return options[(event.id.length + time + action.length) % options.length]
   }
   const addConversationMessage=(message:ConversationMessage)=>setConversationMessages(items=>[...items,message])
+  const recordInteraction=(interaction:CharacterInteraction)=>setInteractions(items=>[...items,interaction])
   const addFollowUp=(event:ScenarioEvent, at:number, text:string)=>setCustomEvents(items=>[...items,{...event,id:`follow-${event.id}-${at}`,at,message:text,mention:false}])
 
   const actionOutcome=(event:ScenarioEvent,action:ActionId)=>{
@@ -234,6 +239,7 @@ function App() {
     }
     setStats(s=>({...s,handled:s.handled+1,responseMinutes:s.responseMinutes+Math.max(0,time-event.at)}))
     setLogs(l=>[...l,{at:sentAt,title:event.branchLabel ?? `${senders[event.sender].name}の連絡`,action:cfg.label,message:['short','careful','question','call'].includes(action)?replyText(event,action as 'short'|'careful'|'question'|'call'):action==='later'?'🕒 あとで対応':undefined,outcome:actionOutcome(event,action),severity:weak?'bad':solved?'good':'warn'}])
+    recordInteraction({id:`interaction-${event.id}-${sentAt}-${action}`,characterId:event.sender,at:sentAt,action,eventId:event.id,threadId:event.threadId,eventAt:event.at,eventMessage:event.message,responseDelay:Math.max(0,sentAt-event.at),message:['short','careful','question','call'].includes(action)?replyText(event,action as 'short'|'careful'|'question'|'call'):undefined,consequence:actionOutcome(event,action),effective:solved&&!weak,duringMeetingId:activeMeeting?.id})
   }
 
   const applyReaction=(event:ScenarioEvent, emoji:string)=>{
@@ -244,6 +250,7 @@ function App() {
     adjust(inappropriate?{team:-5,energy:-.1}:celebratory?{team:2,energy:-.1}:{energy:-.1})
     setStats(s=>({...s,handled:s.handled+1,reactions:s.reactions+1,responseMinutes:s.responseMinutes+Math.max(0,time-event.at)}))
     setLogs(l=>[...l,{at:time+1,title:event.branchLabel ?? `${senders[event.sender].name}の連絡`,action:`${emoji} リアクション`,message:emoji,outcome:inappropriate?'相談に対して反応だけでは不十分で、信頼が下がった':celebratory?'成果を低コストで称賛できた':'見たことを低コストで伝えた',severity:inappropriate?'bad':celebratory?'good':'warn'}])
+    recordInteraction({id:`interaction-${event.id}-${time+1}-reaction`,characterId:event.sender,at:time+1,action:'react',eventId:event.id,threadId:event.threadId,eventAt:event.at,eventMessage:event.message,responseDelay:Math.max(0,time+1-event.at),reaction:emoji,consequence:inappropriate?'見てもらえたが、相談への答えは得られなかった':celebratory?'成果を認めてもらえた':'見たことは伝わった',effective:celebratory||(!inappropriate&&event.kind==='noise'),duringMeetingId:activeMeeting?.id})
     setReactionFor(null)
   }
 
@@ -259,6 +266,7 @@ function App() {
     if(fit>=4&&!overload){setResolvedAt(r=>({...r,[delegateFor.threadId]:time}));adjust({team:2,business:delegateFor.kind==='sales'?4:1});addFollowUp(delegateFor,sentAt+10,'確認しました。こちらで対応を進めます。')}
     else {adjust({team:-3});addFollowUp(delegateFor,sentAt+35,'一度確認しましたが、判断が難しく戻します。進め方をご相談させてください。')}
     setLogs(l=>[...l,{at:sentAt,title:delegateFor.branchLabel??'チャット対応',action:`${person.name}へ委任`,message:delegateText,outcome:fit>=4&&!overload?'適性が合い、自律的に解決した':'適性または余力が合わず、差し戻しが発生',severity:fit>=4&&!overload?'good':'bad'}])
+    recordInteraction({id:`interaction-${delegateFor.id}-${sentAt}-delegate`,characterId:delegateFor.sender,at:sentAt,action:'delegate',eventId:delegateFor.id,threadId:delegateFor.threadId,eventAt:delegateFor.at,eventMessage:delegateFor.message,responseDelay:Math.max(0,sentAt-delegateFor.at),message:delegateText,consequence:fit>=4&&!overload?'適任者が引き取り、対応の見通しが立った':'委任されたが差し戻しが発生した',effective:fit>=4&&!overload,delegateCharacterId:delegateCharacterIds[person.id],delegateName:person.name,duringMeetingId:activeMeeting?.id})
     setDelegateFor(null)
   }
 
@@ -280,6 +288,8 @@ function App() {
     if(choice==='proxy') {adjust({team:2,energy:2});setDelegateList(d=>d.map((x,i)=>i===1?{...x,load:x.load+8}:x))}
     if(choice==='late') advance(10)
     setLogs(l=>[...l,{at:time,title:m.title,action:{join:'参加',skip:'欠席',late:'途中参加',leave:'途中退出',proxy:'代理を立てる'}[choice],outcome:choice==='proxy'?'伊藤さんに目的と期待役割を伝えて任せた':choice==='skip'?'会議時間を空けた。重要な情報は別途必要':choice==='join'?'予定通り参加した':'参加時間を限定した',severity:choice==='proxy'&&m.optional?'good':choice==='skip'&&m.focusNeed>=2?'warn':'good'}])
+    const characterId=meetingCharacterIds[m.id]
+    if(characterId) recordInteraction({id:`meeting-${m.id}-${time}-${choice}`,characterId,at:time,action:'meeting',meetingId:m.id,meetingTitle:m.title,meetingChoice:{join:'参加',skip:'欠席',late:'途中参加',leave:'途中退出',proxy:'代理を立てる'}[choice],consequence:choice==='skip'?'会議で直接話す機会がなかった':choice==='proxy'?'代理を通じて必要な情報が共有された':choice==='join'?'予定どおり対話できた':'一緒に話せる時間が限られた',effective:choice==='join'||choice==='proxy'})
   }
 
   const resolveMissed=(choice:'yes'|'repeat'|'member')=>{
@@ -287,12 +297,14 @@ function App() {
     if(choice==='yes'){adjust({customer:missedMeeting.owner==='顧客'?-8:0,business:-4});setLogs(l=>[...l,{at:time,title:`${missedMeeting.title}で聞き逃し`,action:'そのまま承知',outcome:'宿題の認識が曖昧なまま残った',severity:'bad'}])}
     if(choice==='repeat'){advance(8);adjust({customer:missedMeeting.owner==='顧客'?-2:0});setLogs(l=>[...l,{at:time,title:`${missedMeeting.title}で聞き逃し`,action:'もう一度説明を依頼',outcome:'時間は使ったが認識を修復した',severity:'warn'}])}
     if(choice==='member'){advance(3);adjust({team:-1});setLogs(l=>[...l,{at:time,title:`${missedMeeting.title}で聞き逃し`,action:'後でメンバーに確認',outcome:'会議後に確認タスクが増えた',severity:'warn'}])}
+    const characterId=meetingCharacterIds[missedMeeting.id]
+    if(characterId) recordInteraction({id:`meeting-recovery-${missedMeeting.id}-${time}-${choice}`,characterId,at:time,action:'meeting-recovery',meetingId:missedMeeting.id,meetingTitle:missedMeeting.title,meetingChoice:{yes:'そのまま承知',repeat:'もう一度説明を依頼',member:'後でメンバーに確認'}[choice],consequence:choice==='repeat'?'聞き直して認識を合わせた':choice==='yes'?'理解が曖昧なまま会議を終えた':'別の人を通じて確認することにした',effective:choice==='repeat'})
     setMissedMeeting(null)
   }
 
   const startGame=()=>{
     const data=getModeData(selectedMode)
-    setPhase('play');setTime(0);previousVisible.current=0;setTasks(data.tasks);setCustomEvents([]);setConversationMessages([]);setReactions({});setRead(new Set());setResolvedAt({});setSnoozed(new Set());setMeetingChoices({});setMeetingAttention({});setMeetingEnds({});setProcessed(new Set());setLogs([]);setDelegateList(delegateSeed);setSelected('release');setInboxFilter('all');setReactionFor(null);setDelegateFor(null);setMissedMeeting(null);setEndConfirm(false);setStats({handled:0,reactions:0,delegated:0,responseMinutes:0,focusTotal:0,longestFocus:0,switches:0});setMetrics({customer:78,team:76,business:64,energy:88,focus:82})
+    setPhase('play');setTime(0);previousVisible.current=0;setTasks(data.tasks);setCustomEvents([]);setConversationMessages([]);setReactions({});setRead(new Set());setResolvedAt({});setSnoozed(new Set());setMeetingChoices({});setMeetingAttention({});setMeetingEnds({});setProcessed(new Set());setLogs([]);setInteractions([]);setDelegateList(delegateSeed);setSelected('release');setInboxFilter('all');setReactionFor(null);setDelegateFor(null);setMissedMeeting(null);setEndConfirm(false);setStats({handled:0,reactions:0,delegated:0,responseMinutes:0,focusTotal:0,longestFocus:0,switches:0});setMetrics({customer:78,team:76,business:64,energy:88,focus:82})
   }
   const endGame=()=> time>=540 ? setEndConfirm(true) : setPhase('result')
   const confirmEndGame=()=>{setEndConfirm(false);setPhase('result')}
@@ -300,7 +312,7 @@ function App() {
 
   if(phase==='intro') return <StartScreen onStart={startGame} onRules={()=>setPhase('rules')} selectedMode={selectedMode} onSelectMode={setSelectedMode}/>
   if(phase==='rules') return <RulesScreen onBack={()=>setPhase('intro')} onStart={startGame}/>
-  if(phase==='result') return <ResultScreen time={time} metrics={metrics} tasks={tasks} stats={stats} unread={unreadCount} logs={logs} delegates={delegateList} mode={modeData.config} onRestart={restart}/>
+  if(phase==='result') return <ResultScreen time={time} metrics={metrics} tasks={tasks} stats={stats} unread={unreadCount} logs={logs} interactions={interactions} events={visible} meetingAttention={meetingAttention} delegates={delegateList} mode={modeData.config} onRestart={restart}/>
   if(isMobile) return <MobileGameLayout time={time} metrics={metrics} totalTask={totalTask} activeMeeting={activeMeeting} meetingAttention={meetingAttention} unreadCount={unreadCount} mentionCount={mentionThreads.length} threads={threads} filteredThreads={filteredThreads} selected={selected} selectedLast={selectedLast} selectedTimeline={selectedTimeline} reactions={reactions} snoozed={snoozed} read={read} inboxFilter={inboxFilter} activeMeetings={activeMeetings} meetingChoices={meetingChoices} meetingEnds={meetingEnds} tasks={tasks} toast={toast} meetingPrompt={meetingPrompt} reactionFor={reactionFor} delegateFor={delegateFor} delegates={delegateList} endConfirm={endConfirm} unfinishedTasks={unfinishedTasks} pendingCount={pendingCount} mobileTab={mobileTab} mobileDetail={mobileDetail} mobileMore={mobileMore} onTab={setMobileTab} onOpenThread={(id,events)=>{chooseThread(id,events);setMobileDetail(true);setMobileMore(false)}} onBack={()=>setMobileDetail(false)} onFilter={setInboxFilter} onAction={performAction} onReaction={applyReaction} onCloseReaction={()=>setReactionFor(null)} onDelegate={doDelegate} onCloseDelegate={()=>setDelegateFor(null)} onMeeting={(m,c)=>decideMeeting(m,c)} onFocus={focusTask} onEnd={endGame} onCancelEnd={()=>setEndConfirm(false)} onConfirmEnd={confirmEndGame} onToggleMore={()=>setMobileMore(x=>!x)} />
 
   return <div className="app-shell">
@@ -429,7 +441,7 @@ function RulesScreen({onBack,onStart}:{onBack:()=>void;onStart:()=>void}){
   return <div className="rules-screen"><header className="rules-header"><div className="brand"><span className="brand-mark">M</span><div><strong>Manager's Day</strong><small>ゲームルール</small></div></div><button onClick={onBack}><ArrowLeft/>トップへ戻る</button></header><main className="rules-main"><section className="rules-hero"><span className="eyebrow">HOW TO PLAY</span><h1>未読をゼロにするゲームではありません。</h1><p>限られた時間と注意力を、どこへ配分するか。重要な仕事を前に進めながら、チーム・顧客・事業を守り、できるだけ定時に退勤しましょう。</p><button onClick={onStart}><Play fill="currentColor"/>このまま業務開始</button></section><section className="rules-goal"><div><Target/><h2>勝ち筋</h2><p>重要な問題を見極め、自分のタスクも進め、健全な状態で1日を終えること。</p></div><div><Timer/><h2>時間</h2><p>1日は9:00〜18:00。行動や会議で時間が進み、18:00以降は残業です。</p></div><div><Handshake/><h2>マネジメント</h2><p>自分で抱え込まず、適性と負荷を見て人へ任せることも仕事です。</p></div></section><section className="rules-grid"><article><span className="rule-number">01</span><h2>チャットを読む</h2><p>顧客、メンバー、リーダー、営業、上司などから連絡が届きます。見た目の緊急さではなく、文章・相手・流れから重要度を判断してください。</p><p className="rule-note">FYI、感謝、CCだけの連絡は、反応しないことが最適な場合もあります。</p></article><article><span className="rule-number">02</span><h2>対応を選ぶ</h2><div className="action-rule-list">{actionRows.map(([name,time,description])=><div key={name}><strong>{name}</strong><span>{time}</span><p>{description}</p></div>)}</div></article><article><span className="rule-number">03</span><h2>会議を選ぶ</h2><p>会議開始前に参加・欠席・途中参加・途中退出・代理を選べます。会議中も通知は届きますが、内職をすると会議への集中度が下がります。</p><p className="rule-note">集中が必要な顧客定例や1on1では、聞き逃しが信頼低下や追加作業につながります。</p></article><article><span className="rule-number">04</span><h2>集中時間を守る</h2><p>重要タスクは右側のタスク欄から15・30・60分で進めます。最初の5分は準備に使われ、30分以上の連続作業にはボーナスがあります。</p><p className="rule-note">チャット、通話、会議などで中断すると集中状態は失われます。</p></article><article><span className="rule-number">05</span><h2>放置の代償を読む</h2><p>重要な連絡には見えない悪化タイマーがあります。技術懸念は障害へ、顧客問い合わせはクレームへ、相談は信頼低下や退職兆候へ進むことがあります。</p></article><article><span className="rule-number">06</span><h2>結果を振り返る</h2><p>退勤すると、5つの指標、集中時間、対応傾向、あなたのマネジメントタイプ、そして判断が生んだ分岐点を確認できます。</p></article></section><section className="rules-status"><div><h2>常に見る5つの指標</h2><p>一つだけを最大化しても、良い1日にはなりません。</p></div><div className="status-chips"><span>顧客信頼</span><span>チーム状態</span><span>事業成果</span><span>自分の余力</span><span>自分タスク進捗</span></div></section><section className="rules-cta"><div><span className="eyebrow">READY?</span><h2>今日は、何をあえて後回しにしますか？</h2></div><button onClick={onStart}><Play fill="currentColor"/>業務開始</button></section></main></div>
 }
 
-function ResultScreen({time,metrics,tasks,stats,unread,logs,delegates,mode,onRestart}:{time:number;metrics:Metrics;tasks:WorkTask[];stats:{handled:number;reactions:number;delegated:number;responseMinutes:number;focusTotal:number;longestFocus:number;switches:number};unread:number;logs:DecisionLog[];delegates:Delegate[];mode:typeof modeSettings[GameModeId];onRestart:()=>void}){
+function ResultScreen({time,metrics,tasks,stats,unread,logs,interactions,events,meetingAttention,delegates,mode,onRestart}:{time:number;metrics:Metrics;tasks:WorkTask[];stats:{handled:number;reactions:number;delegated:number;responseMinutes:number;focusTotal:number;longestFocus:number;switches:number};unread:number;logs:DecisionLog[];interactions:CharacterInteraction[];events:ScenarioEvent[];meetingAttention:Record<string,number>;delegates:Delegate[];mode:typeof modeSettings[GameModeId];onRestart:()=>void}){
   const progress=tasks.reduce((s,t)=>s+t.progress,0)/tasks.reduce((s,t)=>s+t.required,0)*100
   const overtime=Math.max(0,time-540)
   let type='バランス型'
@@ -443,10 +455,32 @@ function ResultScreen({time,metrics,tasks,stats,unread,logs,delegates,mode,onRes
   if(overtime>=180) type='長時間残業型'
   const scores={緊急対応:Math.round((metrics.customer+metrics.business)/20),顧客対応:Math.round(metrics.customer/10),育成:Math.round(metrics.team/10),委任:Math.min(10,3+stats.delegated),戦略思考:Math.round(progress/10),自己管理:Math.max(1,Math.round(metrics.energy/10)-Math.ceil(overtime/120))}
   const bestLogs=[...logs].sort((a,b)=>({bad:3,warn:2,good:1}[b.severity]-{bad:3,warn:2,good:1}[a.severity])).slice(0,5)
+  const perspectives=useMemo(()=>generateStakeholderPerspectives({events,interactions,meetingAttention,delegates,tasks,overtime,endTime:time}),[events,interactions,meetingAttention,delegates,tasks,overtime,time])
+  const [selectedPerspectiveId,setSelectedPerspectiveId]=useState<string|null>(null)
+  const perspectiveModalRef=useRef<HTMLDivElement|null>(null)
+  const selectedPerspective=perspectives.find(item=>item.characterId===selectedPerspectiveId)
+  useEffect(()=>{
+    if(!selectedPerspectiveId)return
+    const previous=document.activeElement as HTMLElement|null
+    const onKeyDown=(event:KeyboardEvent)=>{
+      if(event.key==='Escape'){setSelectedPerspectiveId(null);return}
+      if(event.key!=='Tab'||!perspectiveModalRef.current)return
+      const focusable=[...perspectiveModalRef.current.querySelectorAll<HTMLElement>('button,[href],[tabindex]:not([tabindex="-1"])')].filter(element=>!element.hasAttribute('disabled'))
+      if(!focusable.length)return
+      const first=focusable[0];const last=focusable[focusable.length-1]
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
+    }
+    window.addEventListener('keydown',onKeyDown)
+    window.requestAnimationFrame(()=>perspectiveModalRef.current?.querySelector<HTMLElement>('button')?.focus())
+    return()=>{window.removeEventListener('keydown',onKeyDown);previous?.focus()}
+  },[selectedPerspectiveId])
   return <div className="result-screen"><header><div className="brand"><span className="brand-mark">M</span><strong>Manager's Day</strong></div><button onClick={onRestart}>もう一度プレイ</button></header><main><section className="result-hero"><span className="eyebrow">TODAY'S REVIEW</span><h1>今日も、おつかれさまでした。</h1><p>すべてを終えることより、何を選んだか。その積み重ねが今日の結果です。</p><div className="mode-result"><span>プレイモード</span><strong>{mode.label}</strong><small>{mode.summary} {mode.evaluationTone}</small></div><div className="checkout"><div className={overtime>=180?'checkout-late':''}><small>最終退勤時刻</small><strong>{formatTime(time)}</strong><span>{overtime?`残業 ${formatDuration(overtime)}`:'定時内に退勤'}</span></div><div><small>重要タスク達成率</small><strong>{Math.round(progress)}<i>%</i></strong><span>{tasks.filter(t=>t.progress>=t.required).length} / {tasks.length} 完了</span></div><div><small>未読チャット</small><strong>{unread}<i>件</i></strong><span>Inbox Zeroは目的ではありません</span></div></div>{overtime>=180&&<p className="night-shift-message">仕事は進みました。しかし、それを実現するために<strong>{formatDuration(overtime)}</strong>の残業をしています。</p>}</section>
     <section className="result-grid"><div className="type-card"><span className="eyebrow">YOUR MANAGEMENT STYLE</span><h2>{type}<small>マネージャー</small></h2><p>{type==='長時間残業型'?`多くの課題を解決しましたが、最終退勤は${formatTime(time)}でした。成果を自分の時間で埋める傾向が強く、任せ方と時間設計には改善余地があります。`:type==='抱え込み型'?'目の前の問題を自分で解決する力は高い一方、抱え込みが重要タスクと余力を圧迫しました。適性を見て早めに任せると、チームの成長と自分の集中時間を両立できます。':type==='委任型'?'人に任せることで自分の時間を生み出しました。委任先の負荷を観察し、任せっぱなしにしない仕組みが次の一歩です。':type==='戦略型'?'通知に流されず、まとまった時間を重要タスクへ配分できました。必要な対話を取りこぼさないバランスも意識しましょう。':'チーム・顧客・自分の仕事のバランスを取りながら一日を運びました。小さな兆候を拾う精度をさらに磨けそうです。'}</p>{overtime>0&&<div className={`overtime-result ${overtime>=180?'late-night':''}`}><strong>最終退勤 {formatTime(time)}</strong><span>{formatDuration(overtime)}の残業。{overtime>=180?'仕事を終えても、時間設計は結果の一部です。':'残業が成果を補っていないか、振り返ってみましょう。'}</span></div>}<div className="score-bars">{Object.entries(scores).map(([k,v])=><div key={k}><span>{k}</span><div><i style={{width:`${v*10}%`}}/></div><b>{['E','D','D','C','C','B','B','A','A','S','S'][v]}</b></div>)}</div></div>
     <div className="metric-card"><h3>1日の指標</h3><Gauge label="顧客信頼" value={metrics.customer} color="#517263"/><Gauge label="チーム状態" value={metrics.team} color="#6b6482"/><Gauge label="事業成果" value={metrics.business} color="#7b6847"/><Gauge label="自分の余力" value={metrics.energy} color="#58707a"/><div className="stat-tiles"><div><strong>{stats.handled}</strong><span>対応件数</span></div><div><strong>{stats.reactions}</strong><span>リアクション</span></div><div><strong>{stats.delegated}</strong><span>委任</span></div><div><strong>{stats.handled?Math.round(stats.responseMinutes/stats.handled):0}<small>分</small></strong><span>平均返信</span></div><div><strong>{stats.focusTotal}<small>分</small></strong><span>集中合計</span></div><div><strong>{stats.longestFocus}<small>分</small></strong><span>最長集中</span></div></div><p className="load-note">委任先の最大負荷：{Math.max(...delegates.map(d=>d.load))}%</p></div></section>
-    <section className="review-card"><div><span className="eyebrow">KEY MOMENTS</span><h2>今日の重要な分岐点</h2><p>あなたの判断が、後の出来事にどうつながったか。</p></div><div className="timeline">{bestLogs.length?bestLogs.map((l,i)=><div className={`timeline-item ${l.severity}`} key={i}><time>{formatTime(l.at)}</time><span className="timeline-dot"/><div><h3>{l.title}</h3><p><b>あなた：</b>{l.action}{l.message&&<><br/><span className="review-message">「{l.message}」</span></>}</p><p><b>その後：</b>{l.outcome}</p></div></div>):<p>まだ記録された分岐はありません。</p>}</div></section></main></div>
+    <section className="review-card"><div><span className="eyebrow">KEY MOMENTS</span><h2>今日の重要な分岐点</h2><p>あなたの判断が、後の出来事にどうつながったか。</p></div><div className="timeline">{bestLogs.length?bestLogs.map((l,i)=><div className={`timeline-item ${l.severity}`} key={i}><time>{formatTime(l.at)}</time><span className="timeline-dot"/><div><h3>{l.title}</h3><p><b>あなた：</b>{l.action}{l.message&&<><br/><span className="review-message">「{l.message}」</span></>}</p><p><b>その後：</b>{l.outcome}</p></div></div>):<p>まだ記録された分岐はありません。</p>}</div></section>
+    <section className="perspective-section"><div className="perspective-intro"><span className="eyebrow">OTHERS' VIEW</span><h2>周囲から見た今日のあなた</h2><p>あなたから見た今日は、忙しい1日でした。では、周囲からはどんな1日に見えていたでしょうか。</p><small>ここにあるのは正解ではなく、それぞれの人に見えた範囲から生まれた主観です。</small></div><div className="perspective-grid">{perspectives.map(perspective=>{const person=senders[perspective.characterId];return <button className={`perspective-card ${perspective.tone}`} key={perspective.characterId} onClick={()=>setSelectedPerspectiveId(perspective.characterId)}><span className="perspective-person"><Avatar sender={perspective.characterId}/><span><strong>{person.name}</strong><small>{person.role}</small></span><i>{perspective.tone==='positive'?'良好':perspective.tone==='negative'?'気がかり':perspective.tone==='mixed'?'複雑':'フラット'}</i></span><blockquote>「{perspective.quote}」</blockquote><span className="perspective-summary"><span><small>今日の印象</small><strong>{perspective.impression}</strong></span><span><small>関係性</small><strong>{perspective.relationship}</strong></span></span><span className="perspective-open">この人から見た1日を見る <ChevronRight size={14}/></span></button>})}</div></section></main>
+    {selectedPerspective&&<div className="perspective-modal-backdrop" role="presentation" onClick={()=>setSelectedPerspectiveId(null)}><div className="perspective-modal" ref={perspectiveModalRef} role="dialog" aria-modal="true" aria-labelledby="perspective-modal-title" onClick={event=>event.stopPropagation()}><div className="perspective-modal-head"><span className="perspective-person"><Avatar sender={selectedPerspective.characterId} size="large"/><span><small>この人から見えたあなたの1日</small><h2 id="perspective-modal-title">{senders[selectedPerspective.characterId].name}から見えた1日</h2><em>{senders[selectedPerspective.characterId].role}</em></span></span><button onClick={()=>setSelectedPerspectiveId(null)} aria-label="閉じる">×</button></div><blockquote>「{selectedPerspective.quote}」</blockquote><div className="perspective-detail-timeline">{selectedPerspective.moments.length?selectedPerspective.moments.map(moment=><article className={moment.tone} key={moment.id}><time>{formatTime(moment.at)}</time><span/><div>{moment.eventMessage&&<p className="perspective-event">「{moment.eventMessage}」</p>}<p><b>あなた：</b>{moment.playerAction}</p><p><b>この人には：</b>{moment.interpretation}</p></div></article>):<p className="perspective-no-moments">この人に直接見えた主要なやり取りはありませんでした。</p>}</div><div className="perspective-modal-summary"><span><small>今日の印象</small><strong>{selectedPerspective.impression}</strong></span><span><small>関係性</small><strong>{selectedPerspective.relationship}</strong></span></div><p className="perspective-subjective-note">この振り返りには、あなたが別の場所で対応していた事情は含まれていない場合があります。</p></div></div>}</div>
 }
 
 export default App
