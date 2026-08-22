@@ -168,4 +168,28 @@
   .mode-theme .mobile-status-note { background: var(--mode-soft); }
   .mode-theme .mobile-bottom-nav button.active { color: var(--mode-accent); }
   .mode-theme .mobile-bottom-nav b { background: var(--mode-accent); }
+  .mobile-missed-backdrop { z-index: 60; }
+  .mobile-missed-sheet > p strong { color: #35443d; }
+  .mobile-sheet.mobile-missed-sheet > div.mobile-missed-options {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .mobile-missed-options button {
+    min-height: 54px;
+    padding: 9px 11px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 3px;
+    text-align: left;
+  }
+  .mobile-missed-options button:nth-child(2) {
+    background: var(--mode-soft);
+    border-color: var(--mode-border);
+    color: var(--mode-strong);
+  }
+  .mobile-missed-options strong { font-size: 11px; }
+  .mobile-missed-options small { color: #74817b; font-size: 9px; }
 }
