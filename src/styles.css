@@ -2178,3 +2178,118 @@ button:focus-visible {
   color: #526b5e;
   font-style: italic;
 }
+
+/* Mode themes: preserve semantic status colors and change only the main UI accent. */
+.mode-theme {
+  min-height: 100vh;
+  --mode-accent: #315b49;
+  --mode-strong: #244537;
+  --mode-soft: #e3eee7;
+  --mode-surface: #f5f9f6;
+  --mode-border: #95b5a3;
+  --mode-focus: #94b9a8;
+  --mode-shadow: #315b4930;
+}
+.mode-theme.mode-quick {
+  --mode-accent: #a95635;
+  --mode-strong: #7d3e29;
+  --mode-soft: #f8e9e1;
+  --mode-surface: #fff7f2;
+  --mode-border: #d7a28d;
+  --mode-focus: #dca78f;
+  --mode-shadow: #a9563530;
+}
+.mode-theme.mode-fullday {
+  --mode-accent: #4b607f;
+  --mode-strong: #344761;
+  --mode-soft: #e7ecf4;
+  --mode-surface: #f5f7fb;
+  --mode-border: #9eacc0;
+  --mode-focus: #a8b5c9;
+  --mode-shadow: #4b607f30;
+}
+.mode-theme button:focus-visible { outline-color: var(--mode-focus); }
+.mode-theme .brand-mark { background: var(--mode-accent); }
+.mode-theme .count { background: var(--mode-accent); }
+.mode-theme .filter-row button.active {
+  background: var(--mode-soft);
+  color: var(--mode-strong);
+}
+.mode-theme .thread.selected {
+  background: var(--mode-surface);
+  box-shadow: inset 3px 0 var(--mode-accent);
+}
+.mode-theme .action-grid button:hover {
+  border-color: var(--mode-border);
+  background: var(--mode-surface);
+}
+.mode-theme .meeting-row.now { background: var(--mode-surface); }
+.mode-theme .choice:not(.skip) {
+  background: var(--mode-soft);
+  color: var(--mode-strong);
+}
+.mode-theme .task-bottom button:hover,
+.mode-theme .mini-plan:hover {
+  background: var(--mode-soft);
+  border-color: var(--mode-border);
+  color: var(--mode-strong);
+}
+.mode-theme .meeting-live,
+.mode-theme .toast { background: var(--mode-strong); }
+.mode-theme .meeting-live strong { color: var(--mode-border); }
+.mode-theme .meeting-live .attention { border-color: var(--mode-border); }
+.mode-theme .meeting-prompt button.primary,
+.mode-theme .confirm-actions .primary { background: var(--mode-accent); border-color: var(--mode-accent); }
+
+.mode-theme .start-screen { background: var(--mode-soft); }
+.mode-theme .start-visual { background: var(--mode-strong); }
+.mode-theme .start-visual:before { border-color: var(--mode-border); }
+.mode-theme .desk-clock svg,
+.mode-theme .start-copy h1 em,
+.mode-theme .start-rule svg { color: var(--mode-accent); }
+.mode-theme .start-rule { background: var(--mode-soft); }
+.mode-theme .start-copy > button:not(.rules-link),
+.mode-theme .rules-hero button,
+.mode-theme .rules-cta button {
+  background: var(--mode-accent);
+  box-shadow: 0 8px 18px var(--mode-shadow);
+}
+.mode-theme .start-copy > button:not(.rules-link):hover,
+.mode-theme .rules-hero button:hover,
+.mode-theme .rules-cta button:hover { background: var(--mode-strong); }
+.mode-theme .start-copy > button:not(.rules-link) small { color: #ffffffc9; }
+
+.mode-card-quick {
+  --card-accent: #a95635;
+  --card-strong: #7d3e29;
+  --card-soft: #f8e9e1;
+  --card-border: #d7a28d;
+}
+.mode-card-standard {
+  --card-accent: #315b49;
+  --card-strong: #244537;
+  --card-soft: #e3eee7;
+  --card-border: #95b5a3;
+}
+.mode-card-fullday {
+  --card-accent: #4b607f;
+  --card-strong: #344761;
+  --card-soft: #e7ecf4;
+  --card-border: #9eacc0;
+}
+.mode-card { border-top: 3px solid var(--card-accent); }
+.mode-card:hover { border-color: var(--card-border); background: var(--card-soft); }
+.mode-card.selected {
+  background: var(--card-soft);
+  border-color: var(--card-accent);
+  box-shadow: inset 0 0 0 1px var(--card-accent);
+}
+.mode-card strong { color: var(--card-strong); }
+.mode-card em { background: var(--card-accent); }
+
+.mode-theme .mode-result {
+  background: var(--mode-soft);
+  border-left: 3px solid var(--mode-accent);
+}
+.mode-theme .mode-result strong,
+.mode-theme .result-hero > .eyebrow { color: var(--mode-accent); }
